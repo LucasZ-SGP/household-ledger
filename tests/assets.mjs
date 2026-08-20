@@ -99,7 +99,13 @@ export function runAssetTests(t) {
   });
   t("interest compounds month over month when nothing is repaid", () => {
     const t3 = loanTimeline(mortgage, "2026-03-01");
-    near(t3.balance, 500000 * Math.pow(1 + 0.03 / 12, 2), 0.001);
+    // Rounded to cents each month, the way a bank posts it: 1250.00 then 1253.13.
+    assert.equal(t3.balance, 502503.13);
+  });
+  t("every interest charge is rounded to the cent, not carried as a fraction", () => {
+    const rows = loanTimeline(mortgage, "2026-03-01").rows;
+    assert.deepEqual(rows.map((r) => r.amount), [1250, 1253.13]);
+    assert.ok(rows.every((r) => Math.round(r.balance * 100) === r.balance * 100), "balances must be whole cents");
   });
   t("a payment on the accrual day lands after that month's interest", () => {
     const withPayment = {
@@ -107,14 +113,15 @@ export function runAssetTests(t) {
       entries: [{ id: "p1", type: "payment", date: "2026-02-01", amount: 2500 }],
     };
     const t1 = loanTimeline(withPayment, "2026-02-01");
-    near(t1.balance, 501250 - 2500, 0.001);
+    assert.equal(t1.balance, 501250 - 2500);
     assert.equal(t1.rows[0].type, "interest");
-    assert.equal(t1.rows[1].type, "payment");
+    // "payment" is the pre-statement-codes name; it reads back as an instalment.
+    assert.equal(t1.rows[1].type, "instalment");
   });
   t("skipping the app for months still charges every month", () => {
     const t12 = loanTimeline(mortgage, "2027-01-01");
     assert.equal(t12.monthsAccrued, 12);
-    near(t12.balance, 500000 * Math.pow(1 + 0.03 / 12, 12), 0.01);
+    assert.equal(t12.balance, 515207.99);
   });
   t("a rate change on the accrual day applies to that month", () => {
     const repriced = {
@@ -122,7 +129,7 @@ export function runAssetTests(t) {
       entries: [{ id: "r1", type: "rate_change", date: "2026-02-01", rate: 4 }],
     };
     const t1 = loanTimeline(repriced, "2026-02-01");
-    near(t1.totalInterest, 500000 * 0.04 / 12, 0.001, "priced at the new rate");
+    assert.equal(t1.totalInterest, 1666.67);
     assert.equal(t1.rate, 4);
   });
   t("a payment larger than the balance cannot make it negative", () => {

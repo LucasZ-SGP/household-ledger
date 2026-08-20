@@ -9,6 +9,7 @@ import {
   ASSET_KINDS, LIABILITY_KINDS, KIND_META, newAccount, valueAccount,
   summarizeAccounts, heldSymbols, snapshotFromAccounts, accountAlerts,
   addMonthsISO, todayISO, sideOf, cpfTotal, valueFixedDeposit, loanTimeline,
+  valueProperty, valueVehicle,
 } from "../lib/assets.js";
 import { fetchQuotes, mergeQuotes, providerMeta } from "../lib/quotes.js";
 import AccountDetail from "./AccountDetail.jsx";
@@ -23,7 +24,7 @@ function headlineOf(acc, quotes, asOf) {
   return { text: parts.map(([c, amt]) => formatMoney(amt, c)).join(" + "), side: v.side };
 }
 
-function subtitleOf(acc, quotes, asOf) {
+function subtitleOf(acc, quotes, asOf, accounts = []) {
   if (acc.kind === "fixed_deposit") {
     const v = valueFixedDeposit(acc, asOf);
     if (!v.maturityDate) return "未设到期日";
@@ -34,9 +35,20 @@ function subtitleOf(acc, quotes, asOf) {
     return `${n} 个持仓${acc.cash ? ` · 现金 ${formatMoney(acc.cash, acc.currency)}` : ""}`;
   }
   if (acc.kind === "cpf") return `OA/SA/MA/RA 合计 ${formatMoney(cpfTotal(acc), acc.currency)}`;
+  if (acc.kind === "property") {
+    const v = valueProperty(acc, { asOf, accounts });
+    return v.equity === null ? "未关联贷款" : `净权益 ${formatMoney(v.equity, acc.currency)}（已扣 ${formatMoney(v.loanBalance, acc.currency)} 贷款）`;
+  }
+  if (acc.kind === "vehicle") {
+    const v = valueVehicle(acc, asOf);
+    if (!v.coeExpiry) return v.depreciated ? "按 COE 自动折旧" : "";
+    return v.daysToCoeExpiry > 0
+      ? `COE ${v.coeExpiry} 到期 · 还有 ${(v.daysToCoeExpiry / 365).toFixed(1)} 年${v.depreciated ? " · 自动折旧" : ""}`
+      : `COE 已于 ${v.coeExpiry} 到期`;
+  }
   if (acc.kind === "mortgage" || acc.kind === "loan") {
     const t = loanTimeline(acc, asOf);
-    return `年利率 ${t.rate}% · 每月 ${acc.accrualDay || 1} 号计息 · 下次 ${t.nextAccrualDate || "—"}`;
+    return `年利率 ${t.rate}% · 每月 ${acc.accrualDay || 1} 号计息 · ${t.rows.length} 条记录 · 下次 ${t.nextAccrualDate || "—"}`;
   }
   if (acc.kind === "cash" && acc.annualRate) return `年利率 ${acc.annualRate}%`;
   return "";
@@ -125,6 +137,44 @@ function AccountForm({ draft, setDraft, currencies }) {
           </Field>
         )}
 
+        {draft.kind === "property" && (
+          <>
+            <Field label="当前估值">
+              <input className="input num" type="number" step="0.01" value={draft.value}
+                onChange={(e) => set({ value: e.target.value })} />
+            </Field>
+            <Field label="购入价">
+              <input className="input num" type="number" step="0.01" value={draft.purchasePrice}
+                onChange={(e) => set({ purchasePrice: e.target.value })} />
+            </Field>
+            <Field label="购入日期">
+              <input className="input" type="date" value={draft.purchaseDate || ""}
+                onChange={(e) => set({ purchaseDate: e.target.value })} />
+            </Field>
+          </>
+        )}
+
+        {draft.kind === "vehicle" && (
+          <>
+            <Field label="当前估值">
+              <input className="input num" type="number" step="0.01" value={draft.value}
+                onChange={(e) => set({ value: e.target.value })} />
+            </Field>
+            <Field label="购入价">
+              <input className="input num" type="number" step="0.01" value={draft.purchasePrice}
+                onChange={(e) => set({ purchasePrice: e.target.value })} />
+            </Field>
+            <Field label="购入日期">
+              <input className="input" type="date" value={draft.purchaseDate || ""}
+                onChange={(e) => set({ purchaseDate: e.target.value })} />
+            </Field>
+            <Field label="COE 到期日">
+              <input className="input" type="date" value={draft.coeExpiry || ""}
+                onChange={(e) => set({ coeExpiry: e.target.value })} />
+            </Field>
+          </>
+        )}
+
         {draft.kind === "other_asset" && (
           <Field label="估值">
             <input className="input num" type="number" step="0.01" value={draft.value}
@@ -165,9 +215,13 @@ function AccountForm({ draft, setDraft, currencies }) {
       )}
       {(draft.kind === "mortgage" || draft.kind === "loan") && (
         <div className="tiny faint">
-          填「放款金额」和「放款日」，之后每月计息日的利息会自动往上加；已经还过的月供在账户里逐笔记一下就行。
-          要是记不清历史，就把放款日填成最近一次对账的日期、本金填那天的欠款余额。
+          填「放款金额」和「放款日」，之后每月计息日的利息会自动往上加。
+          有银行的 Statement of Account 的话，建好账户后展开它、点「导入对账单」整段粘贴进去，
+          历史记录一次就补齐了 —— 比手敲快得多，而且会用对账单自己的期末余额校验一遍。
         </div>
+      )}
+      {draft.kind === "property" && (
+        <div className="tiny faint">建好之后展开它，可以关联对应的房贷，直接看净权益（估值 − 贷款余额）。</div>
       )}
     </div>
   );
@@ -286,7 +340,7 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
               <span className="tiny faint">{meta.label}{acc.institution ? ` · ${acc.institution}` : ""}</span>
               {acc.archived && <span className="tiny faint">· 已归档</span>}
             </div>
-            <div className="tiny faint" style={{ marginLeft: 33 }}>{subtitleOf(acc, quotes, asOf)}</div>
+            <div className="tiny faint" style={{ marginLeft: 33 }}>{subtitleOf(acc, quotes, asOf, accounts)}</div>
           </div>
           <div className="row" style={{ flexWrap: "nowrap" }}>
             <span className={`metric-value num ${head.side === "liability" ? "neg" : ""}`}>{head.text}</span>
@@ -315,6 +369,7 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
           <div style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
             <AccountDetail
               account={acc} quotes={quotes} asOf={asOf} currencies={data.currencies}
+              accounts={accounts}
               patch={(p) => patchAccount(acc.id, p)} setQuote={setQuote}
             />
             {acc.note ? <div className="tiny faint" style={{ marginTop: 8 }}>备注：{acc.note}</div> : null}

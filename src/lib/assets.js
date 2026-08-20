@@ -11,7 +11,7 @@
 
 import { uid } from "./model.js";
 
-export const ASSET_KINDS = ["cash", "fixed_deposit", "brokerage", "cpf", "other_asset"];
+export const ASSET_KINDS = ["cash", "fixed_deposit", "brokerage", "cpf", "property", "vehicle", "other_asset"];
 export const LIABILITY_KINDS = ["mortgage", "loan"];
 
 export const KIND_META = {
@@ -19,6 +19,8 @@ export const KIND_META = {
   fixed_deposit: { label: "银行定期", side: "asset", color: "#2F6F5E" },
   brokerage: { label: "股票账户", side: "asset", color: "#35618F" },
   cpf: { label: "CPF 公积金", side: "asset", color: "#6E5A9E" },
+  property: { label: "房产", side: "asset", color: "#B58A3D" },
+  vehicle: { label: "汽车", side: "asset", color: "#5B7A9E" },
   other_asset: { label: "其他资产", side: "asset", color: "#8A9A8F" },
   mortgage: { label: "房贷", side: "liability", color: "#A63D40" },
   loan: { label: "其他贷款", side: "liability", color: "#C1502E" },
@@ -111,10 +113,22 @@ export function newAccount(kind, currency = "SGD") {
       };
     case "other_asset":
       return { ...base, value: 0, asOf: today };
+    case "property":
+      return {
+        ...base, purchasePrice: 0, purchaseDate: today,
+        value: 0, valuationDate: today, linkedLoanId: null,
+      };
+    case "vehicle":
+      return {
+        ...base, purchasePrice: 0, purchaseDate: today,
+        value: 0, valuationDate: today,
+        coeExpiry: addMonthsISO(today, 120), residualValue: 0, autoDepreciate: false,
+      };
     case "mortgage":
     case "loan":
       return {
-        ...base, principal: 0, annualRate: 0, startDate: today,
+        // 2.6% is the HDB concessionary rate, which is what most of these are.
+        ...base, principal: 0, annualRate: kind === "mortgage" ? 2.6 : 0, startDate: today,
         accrualDay: 1, monthlyPayment: 0, termMonths: 0, entries: [],
       };
     default:
@@ -274,15 +288,66 @@ export function cpfTotal(acc) {
 // storing a running balance, so a missed month can never silently vanish.
 // ---------------------------------------------------------------------------
 
-const ENTRY_ORDER = { rate_change: 0, interest: 1, drawdown: 2, payment: 3, set_balance: 4 };
-
-export const LOAN_ENTRY_LABELS = {
-  interest: "月度利息",
-  payment: "还款",
-  drawdown: "追加提款",
-  rate_change: "利率变更",
-  set_balance: "余额校准",
+// Entry types, mirroring the codes an HDB statement actually prints so an
+// imported statement and a hand-typed entry end up as the same thing.
+// `sign` is what the entry does to the outstanding balance.
+export const LOAN_ENTRY_TYPES = {
+  disbursement: { label: "放款", code: "RES", sign: 1, order: 1 },
+  disbursement_interest: { label: "放款利息", code: "RES-I", sign: 1, order: 2 },
+  rate_change: { label: "利率变更", code: "RATE", sign: 0, order: 0 },
+  interest: { label: "月度利息", code: "IP", sign: 1, order: 3, generated: true },
+  fee: { label: "费用", code: "FEE", sign: 1, order: 4 },
+  interest_payment: { label: "利息还款", code: "AXS-I", sign: -1, order: 5 },
+  instalment: { label: "月供", code: "CPF", sign: -1, order: 6 },
+  prepayment: { label: "提前还款", code: "AXS-L", sign: -1, order: 7 },
+  rebate: { label: "利息回扣", code: "INT-R", sign: -1, order: 8 },
+  set_balance: { label: "余额校准", code: "BAL", sign: 0, order: 9 },
 };
+
+// Entries written before the statement codes existed.
+const LEGACY_TYPES = { payment: "instalment", drawdown: "disbursement" };
+
+export function canonicalEntryType(type) {
+  return LEGACY_TYPES[type] || (LOAN_ENTRY_TYPES[type] ? type : "prepayment");
+}
+
+export function entryMeta(type) {
+  return LOAN_ENTRY_TYPES[canonicalEntryType(type)];
+}
+
+/** Types a person picks from by hand — interest is generated, not typed. */
+export const MANUAL_ENTRY_TYPES = Object.keys(LOAN_ENTRY_TYPES).filter((k) => !LOAN_ENTRY_TYPES[k].generated);
+
+export const LOAN_ENTRY_LABELS = Object.fromEntries(
+  Object.entries(LOAN_ENTRY_TYPES).map(([k, v]) => [k, v.label])
+);
+
+/** Banks post cents, not fractions of cents. Rounding here is what makes a replay reconcile to the statement. */
+export function round2(v) {
+  return Math.round((Number(v) + Number.EPSILON) * 100) / 100;
+}
+
+export function monthlyInterest(balance, annualRate) {
+  if (balance <= 0) return 0;
+  return round2(balance * (num(annualRate) / 100) / 12);
+}
+
+/**
+ * Interest refunded when a lump sum lands mid-month.
+ *
+ * The month's interest was already charged on the 1st against the old balance,
+ * so paying down on day D earns back the part covering the rest of the month.
+ * Reverse-engineered from 25 INT-R rows across three HDB statements, every one
+ * of which matches this to the cent.
+ */
+export function estimateRebate(amount, annualRate, dateISO) {
+  if (!isISODate(dateISO)) return 0;
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const dim = daysInMonth(y, m);
+  const daysLeft = dim - d;
+  if (daysLeft <= 0) return 0;
+  return round2(num(amount) * (num(annualRate) / 100) / 12 * (daysLeft / dim));
+}
 
 /** The accrual dates strictly after `startDate` and up to `asOfISO`. */
 export function accrualDates(startDate, accrualDay, asOfISO) {
@@ -302,72 +367,101 @@ export function accrualDates(startDate, accrualDay, asOfISO) {
 
 /**
  * Replays a loan to `asOfISO`.
- * Returns every event in order with the balance after it, plus the totals.
+ *
+ * Interest is generated month by month, except where the statement already
+ * says what it was: an explicit interest entry for a month wins over the
+ * computed one. That way you can import real history and still have the app
+ * carry the loan forward on its own from the last statement onward.
  */
 export function loanTimeline(acc, asOfISO = todayISO()) {
   const startDate = isISODate(acc.startDate) ? acc.startDate : asOfISO;
   const accrualDay = num(acc.accrualDay) || 1;
   const entries = (acc.entries || [])
     .filter((e) => isISODate(e.date) && e.date <= asOfISO)
-    .map((e) => ({ ...e, amount: num(e.amount) }));
+    .map((e) => ({ ...e, type: canonicalEntryType(e.type), amount: num(e.amount) }));
 
-  const events = [
-    ...accrualDates(startDate, accrualDay, asOfISO).map((date) => ({ type: "interest", date })),
-    ...entries,
-  ].sort((a, b) => {
+  const statedInterestMonths = new Set(
+    entries.filter((e) => e.type === "interest").map((e) => e.date.slice(0, 7))
+  );
+  const generated = accrualDates(startDate, accrualDay, asOfISO)
+    .filter((date) => !statedInterestMonths.has(date.slice(0, 7)))
+    .map((date) => ({ type: "interest", date, id: `auto-i-${date}`, generated: true }));
+
+  const events = [...generated, ...entries].sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    return (ENTRY_ORDER[a.type] ?? 9) - (ENTRY_ORDER[b.type] ?? 9);
+    const oa = entryMeta(a.type).order;
+    const ob = entryMeta(b.type).order;
+    if (oa !== ob) return oa - ob;
+    return String(a.id).localeCompare(String(b.id));
   });
 
   let balance = num(acc.principal);
   let rate = num(acc.annualRate);
-  let totalInterest = 0;
-  let totalPaid = 0;
+  const totals = { interest: 0, instalment: 0, prepayment: 0, rebate: 0, fee: 0, disbursement: 0, interest_payment: 0, disbursement_interest: 0 };
   const rows = [];
 
   for (const ev of events) {
+    const meta = entryMeta(ev.type);
     if (ev.type === "rate_change") {
       rate = num(ev.rate);
-      rows.push({ ...ev, balance, rate, amount: 0 });
-      continue;
-    }
-    if (ev.type === "interest") {
-      const amount = balance > 0 ? balance * (rate / 100) / 12 : 0;
-      balance += amount;
-      totalInterest += amount;
-      rows.push({ ...ev, amount, rate, balance, id: `i-${ev.date}` });
-      continue;
-    }
-    if (ev.type === "payment") {
-      const applied = Math.min(Math.max(0, ev.amount), balance);
-      balance -= applied;
-      totalPaid += applied;
-      rows.push({ ...ev, amount: applied, rate, balance, short: applied < ev.amount });
-      continue;
-    }
-    if (ev.type === "drawdown") {
-      balance += Math.max(0, ev.amount);
-      rows.push({ ...ev, rate, balance });
+      rows.push({ ...ev, code: meta.code, balance, rate, amount: 0 });
       continue;
     }
     if (ev.type === "set_balance") {
       balance = Math.max(0, ev.amount);
-      rows.push({ ...ev, rate, balance });
+      rows.push({ ...ev, code: meta.code, rate, balance });
+      continue;
     }
+    let amount = ev.generated ? monthlyInterest(balance, rate) : Math.max(0, round2(ev.amount));
+    // A generated charge on a zero balance is noise; the statement wouldn't print it either.
+    if (ev.generated && amount === 0) continue;
+    let short = false;
+    if (meta.sign < 0) {
+      // Nothing can push the balance below zero — the excess is flagged, not swallowed.
+      const applied = Math.min(amount, balance);
+      short = applied < amount - 0.005;
+      amount = applied;
+      balance = round2(balance - applied);
+    } else if (meta.sign > 0) {
+      balance = round2(balance + amount);
+    }
+    totals[ev.type] = (totals[ev.type] || 0) + amount;
+    rows.push({
+      ...ev,
+      code: ev.type === "interest" ? `${meta.code}-${Number(rate).toFixed(2)}` : meta.code,
+      amount, rate, balance, short,
+      id: ev.id || `${ev.type}-${ev.date}`,
+    });
   }
 
+  const totalPaid = totals.instalment + totals.prepayment + totals.rebate + totals.interest_payment;
   const nextAccrualDate = nextAccrualAfter(startDate, accrualDay, asOfISO);
   return {
     rows,
     balance,
     rate,
-    totalInterest,
+    totals,
+    totalInterest: totals.interest + totals.disbursement_interest,
     totalPaid,
-    principalRepaid: totalPaid - totalInterest,
+    principalRepaid: totalPaid - totals.interest,
     nextAccrualDate,
-    nextAccrualInterest: balance * (rate / 100) / 12,
+    nextAccrualInterest: monthlyInterest(balance, rate),
     monthsAccrued: rows.filter((r) => r.type === "interest").length,
   };
+}
+
+/** Per-calendar-year subtotals, the way the annual statement is laid out. */
+export function loanYearSummary(timeline) {
+  const byYear = new Map();
+  for (const r of timeline.rows) {
+    const y = r.date.slice(0, 4);
+    const row = byYear.get(y) || { year: y, interest: 0, instalment: 0, prepayment: 0, rebate: 0, fee: 0, closing: 0, count: 0 };
+    if (r.type in row) row[r.type] += r.amount;
+    row.closing = r.balance;
+    row.count++;
+    byYear.set(y, row);
+  }
+  return Array.from(byYear.values());
 }
 
 export function nextAccrualAfter(startDate, accrualDay, asOfISO) {
@@ -456,6 +550,66 @@ export function valueBrokerage(acc, quotes = {}, asOfISO = todayISO()) {
 }
 
 // ---------------------------------------------------------------------------
+// Physical assets — a house or a car is worth what you say it is worth, so the
+// job here is mostly bookkeeping around that number rather than pricing it.
+// ---------------------------------------------------------------------------
+
+/**
+ * A car loses value on a schedule you can actually predict in Singapore: the
+ * COE runs out on a known date and the car is worth roughly its scrap value
+ * then. Straight line between purchase and that date is crude but honest, and
+ * it beats a number last touched two years ago. Off by default.
+ */
+export function valueVehicle(acc, asOfISO = todayISO()) {
+  const purchasePrice = num(acc.purchasePrice);
+  const residual = num(acc.residualValue);
+  const manual = num(acc.value);
+  const expiry = isISODate(acc.coeExpiry) ? acc.coeExpiry : null;
+  const bought = isISODate(acc.purchaseDate) ? acc.purchaseDate : null;
+
+  let value = manual;
+  let depreciated = false;
+  if (acc.autoDepreciate && expiry && bought && expiry > bought && purchasePrice > 0) {
+    const total = daysBetween(bought, expiry);
+    const elapsed = Math.min(Math.max(0, daysBetween(bought, asOfISO)), total);
+    value = round2(purchasePrice - (purchasePrice - residual) * (elapsed / total));
+    depreciated = true;
+  }
+  return {
+    value,
+    purchasePrice,
+    depreciated,
+    coeExpiry: expiry,
+    daysToCoeExpiry: expiry ? daysBetween(asOfISO, expiry) : null,
+    loss: purchasePrice ? value - purchasePrice : null,
+    lossPct: purchasePrice ? ((value - purchasePrice) / purchasePrice) * 100 : null,
+    valuationDate: acc.valuationDate || null,
+  };
+}
+
+/**
+ * A property's own number, plus the equity left once the loan against it is
+ * paid off. Linking the mortgage is what turns two numbers into the one that
+ * actually matters.
+ */
+export function valueProperty(acc, { asOf = todayISO(), accounts = [] } = {}) {
+  const purchasePrice = num(acc.purchasePrice);
+  const value = num(acc.value);
+  const loan = acc.linkedLoanId ? accounts.find((a) => a.id === acc.linkedLoanId) : null;
+  const loanBalance = loan ? loanTimeline(loan, asOf).balance : null;
+  return {
+    value,
+    purchasePrice,
+    gain: purchasePrice ? value - purchasePrice : null,
+    gainPct: purchasePrice ? ((value - purchasePrice) / purchasePrice) * 100 : null,
+    loanName: loan ? loan.name : null,
+    loanBalance,
+    equity: loanBalance === null ? null : round2(value - loanBalance),
+    valuationDate: acc.valuationDate || null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Valuation across every kind
 // ---------------------------------------------------------------------------
 
@@ -465,7 +619,7 @@ export function valueBrokerage(acc, quotes = {}, asOfISO = todayISO()) {
  * Deliberately no FX: the app reports each currency on its own terms, the same
  * way the dashboard does, instead of inventing a rate.
  */
-export function valueAccount(acc, { asOf = todayISO(), quotes = {} } = {}) {
+export function valueAccount(acc, { asOf = todayISO(), quotes = {}, accounts = [] } = {}) {
   const side = sideOf(acc.kind);
   const one = (amount) => ({ [acc.currency]: amount });
 
@@ -485,6 +639,14 @@ export function valueAccount(acc, { asOf = todayISO(), quotes = {} } = {}) {
     case "cpf": {
       const detail = cpfInterest(acc, asOf);
       return { side, byCurrency: one(detail.total), detail };
+    }
+    case "property": {
+      const detail = valueProperty(acc, { asOf, accounts });
+      return { side, byCurrency: one(detail.value), detail };
+    }
+    case "vehicle": {
+      const detail = valueVehicle(acc, asOf);
+      return { side, byCurrency: one(detail.value), detail };
     }
     case "mortgage":
     case "loan": {
@@ -510,7 +672,7 @@ export function summarizeAccounts(accounts = [], { asOf = todayISO(), quotes = {
   const valued = [];
   for (const acc of accounts) {
     if (acc.archived) continue;
-    const v = valueAccount(acc, { asOf, quotes });
+    const v = valueAccount(acc, { asOf, quotes, accounts });
     valued.push({ account: acc, ...v });
     if (v.detail && Array.isArray(v.detail.missing)) v.detail.missing.forEach((s) => missing.add(s));
     for (const [ccy, amount] of Object.entries(v.byCurrency)) {
@@ -563,6 +725,14 @@ export function accountAlerts(accounts = [], { asOf = todayISO(), quotes = {} } 
         alerts.push({ tone: "warn", accountId: acc.id, message: `「${acc.name || "定期存款"}」已于 ${v.maturityDate} 到期，记得转存或续做。` });
       } else if (v.daysToMaturity !== null && v.daysToMaturity <= 30) {
         alerts.push({ tone: "info", accountId: acc.id, message: `「${acc.name || "定期存款"}」还有 ${v.daysToMaturity} 天到期（${v.maturityDate}）。` });
+      }
+    }
+    if (acc.kind === "vehicle" && isISODate(acc.coeExpiry)) {
+      const left = daysBetween(asOf, acc.coeExpiry);
+      if (left <= 0) {
+        alerts.push({ tone: "warn", accountId: acc.id, message: `「${acc.name || "汽车"}」的 COE 已于 ${acc.coeExpiry} 到期。` });
+      } else if (left <= 180) {
+        alerts.push({ tone: "info", accountId: acc.id, message: `「${acc.name || "汽车"}」的 COE 还有 ${left} 天到期（${acc.coeExpiry}）。` });
       }
     }
     if (acc.kind === "mortgage" || acc.kind === "loan") {

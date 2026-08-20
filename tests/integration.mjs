@@ -5,6 +5,7 @@ jsdomGlobal(undefined, { url: "http://localhost/", pretendToBeVisual: true });
 
 import assert from "node:assert/strict";
 import { createRequire } from "module";
+import { HDB_ALL, CLOSING } from "./fixtures/loanstatement.mjs";
 
 class RO { observe() {} unobserve() {} disconnect() {} }
 window.ResizeObserver = RO; globalThis.ResizeObserver = RO;
@@ -137,6 +138,14 @@ async function select(el, value) {
     el.dispatchEvent(new window.Event("change", { bubbles: true }));
     await flush(30);
   });
+}
+// Fields are rendered as <div class="field-label">名称</div> followed by the control.
+function fieldInput(scope, label) {
+  const el = Array.from(scope.querySelectorAll(".field-label")).find((d) => d.textContent.trim().startsWith(label));
+  return el ? el.nextElementSibling : null;
+}
+function cardWith(frag) {
+  return Array.from(container.querySelectorAll(".card")).find((c) => c.textContent.includes(frag));
 }
 function inputByPlaceholder(frag) {
   return Array.from(container.querySelectorAll("input")).find((i) => (i.placeholder || "").includes(frag));
@@ -359,19 +368,88 @@ await step("net worth reflects the loan as a liability", async () => {
   assert.ok(owed, `expected a balance above the 500,000 principal, body had: ${body.match(/S\$[\d,]+\.\d\d/g)}`);
 });
 
-await step("recording a payment reduces the outstanding balance", async () => {
+const owed = () => parseFloat(cardWith("下次计息").textContent.match(/S\$([\d,]+\.\d\d)/)[1].replace(/,/g, ""));
+
+await step("recording a prepayment reduces the outstanding balance", async () => {
   // A freshly added account opens expanded, so its detail is already on screen.
   assert.ok(text().includes("下次计息"), "loan detail should be open after adding");
-
-  const openCard = Array.from(container.querySelectorAll(".card")).find((c) => c.textContent.includes("下次计息"));
-  const before = openCard.textContent.match(/S\$([\d,]+\.\d\d)/)[1];
-  const amount = Array.from(openCard.querySelectorAll('input[type="number"]')).pop();
-  await type(amount, "2500");
+  const before = owed();
+  await type(fieldInput(cardWith("下次计息"), "金额"), "2500");
   await click("记入");
-  const after = Array.from(container.querySelectorAll(".card"))
-    .find((c) => c.textContent.includes("下次计息")).textContent.match(/S\$([\d,]+\.\d\d)/)[1];
-  assert.notEqual(before, after, "balance should move after a payment");
-  assert.ok(parseFloat(after.replace(/,/g, "")) < parseFloat(before.replace(/,/g, "")), "payment should reduce the balance");
+  assert.ok(owed() < before, `prepayment should reduce the balance (${before} -> ${owed()})`);
+});
+
+await step("a prepayment also books the mid-month interest rebate", async () => {
+  const card = cardWith("下次计息");
+  assert.ok(card.textContent.includes("利息回扣"), "expected the rebate row in the ledger");
+  const rebateRows = Array.from(card.querySelectorAll("tbody tr"))
+    .filter((r) => r.textContent.includes("INT-R"));
+  assert.equal(rebateRows.length, 1, "one rebate per prepayment");
+});
+
+await step("the full ledger shows every row with its statement code", async () => {
+  await click("全部");
+  const card = cardWith("完整记录");
+  // This loan was set up at 3%, so its generated charges print as IP-3.00.
+  assert.match(card.textContent, /IP-3\.00/, "expected the interest code");
+  assert.ok(card.textContent.includes("AXS-L"), "expected the prepayment code");
+  assert.ok(card.textContent.includes("自动"), "generated interest should be marked");
+});
+
+await step("an entry can be edited and the balance recomputes", async () => {
+  const card = cardWith("完整记录");
+  const row = Array.from(card.querySelectorAll("tbody tr")).find((r) => r.textContent.includes("AXS-L"));
+  const pencil = Array.from(row.querySelectorAll("button")).find((b) => b.getAttribute("title") === "编辑");
+  await act(async () => { pencil.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(60); });
+  assert.ok(text().includes("修改记录"), "edit form did not open");
+  const before = owed();
+  await type(fieldInput(cardWith("修改记录"), "金额"), "5000");
+  await click("保存修改");
+  assert.ok(owed() < before, "raising the prepayment should lower the balance further");
+});
+
+await step("an entry can be deleted and the balance goes back", async () => {
+  const before = owed();
+  const row = Array.from(cardWith("完整记录").querySelectorAll("tbody tr")).find((r) => r.textContent.includes("AXS-L"));
+  const bin = Array.from(row.querySelectorAll("button")).find((b) => b.getAttribute("title") === "删除");
+  await act(async () => { bin.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(60); });
+  await click("删除");
+  assert.ok(owed() > before, "removing a prepayment should raise the balance");
+});
+
+await step("pasting a real statement reconciles and imports", async () => {
+  await click("导入对账单");
+  const panel = cardWith("导入对账单");
+  const ta = Array.from(panel.querySelectorAll("textarea")).pop();
+  await type(ta, HDB_ALL);
+  await click("解析");
+  assert.match(text(), /解析出/, "parse summary missing");
+  assert.match(text(), /对账通过/, `expected reconciliation to pass; got: ${text().match(/对不上[^。]*。/) || ""}`);
+  assert.match(text(), /25\/25 条与/, "expected the interest cross-check");
+  await click("确认导入");
+  assert.match(text(), /导入完成：新增 135 条记录/);
+});
+
+await step("the imported loan matches the statement's closing balance to the cent", async () => {
+  await click("全部");
+  const card = cardWith("完整记录");
+  const expected = `S$${CLOSING[2026].toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+  assert.ok(card.textContent.includes(expected), `expected ${expected}; body had ${card.textContent.match(/S\$[\d,]+\.\d\d/g)?.slice(0, 5)}`);
+});
+
+await step("re-importing the same statement adds nothing", async () => {
+  // The panel stays open after an import, ready for the next statement.
+  await type(Array.from(cardWith("导入对账单").querySelectorAll("textarea")).pop(), HDB_ALL);
+  await click("解析");
+  await click("确认导入");
+  assert.match(text(), /新增 0 条记录，跳过 135 条重复/);
+});
+
+await step("yearly subtotals appear when a year is picked", async () => {
+  await click("2025 年");
+  assert.match(text(), /2025 年：/);
+  const expected = `S$${CLOSING[2025].toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+  assert.ok(cardWith("完整记录").textContent.includes(expected), `expected the 2025 closing balance ${expected}`);
 });
 
 await step("a brokerage holding values at quantity x price once a price is known", async () => {
@@ -438,7 +516,9 @@ await step("saved payload is valid UTF-8 JSON with Chinese intact", () => {
   assert.ok(parsed.rules.some((r) => r.pattern === "WEIRD ABBREV POS 4471"), "learned rule not persisted");
   assert.equal(parsed.accounts.length, 3, "accounts not persisted");
   const loan = parsed.accounts.find((a) => a.kind === "mortgage");
-  assert.equal(loan.entries.length, 1, "the recorded payment should be in the file");
+  const fromStatement = loan.entries.filter((e) => e.source === "statement");
+  assert.equal(fromStatement.length, 135, "the imported statement should be in the file");
+  assert.ok(loan.entries.some((e) => e.type === "rebate" && e.source !== "statement"), "the hand-entered rebate should survive too");
   assert.equal(parsed.quotes.QQQ.price, 500, "the last known price should travel with the ledger");
   assert.equal(parsed.schemaVersion, 2);
 });

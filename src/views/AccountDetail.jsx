@@ -1,13 +1,13 @@
 import React, { useState } from "react";
-import { Trash2, Plus, RefreshCw, Pencil, Check } from "lucide-react";
+import { Trash2, Plus, Pencil, Check } from "lucide-react";
 import { Field, Note } from "../components/ui.jsx";
 import { formatMoney, accentFor } from "../lib/model.js";
 import {
-  valueFixedDeposit, loanTimeline, loanPayoff, cpfInterest, valueBrokerage,
-  CPF_ACCOUNTS, LOAN_ENTRY_LABELS, newHolding, newLoanEntry, normalizeSymbol,
-  todayISO, addMonthsISO,
+  valueFixedDeposit, cpfInterest, valueBrokerage, valueProperty, valueVehicle,
+  CPF_ACCOUNTS, newHolding, normalizeSymbol, todayISO,
 } from "../lib/assets.js";
 import { manualQuote } from "../lib/quotes.js";
+import LoanLedger from "./LoanLedger.jsx";
 
 const pct = (v) => `${(Number(v) || 0).toFixed(2)}%`;
 
@@ -255,132 +255,112 @@ function CpfDetail({ acc, patch, asOf }) {
 
 // ---------------------------------------------------------------------------
 
-function LoanDetail({ acc, patch, asOf, currency }) {
-  const [showAll, setShowAll] = useState(false);
-  const [entry, setEntry] = useState(() => newLoanEntry("payment"));
-  const t = loanTimeline(acc, asOf);
-  const payoff = loanPayoff(t.balance, t.rate, acc.monthlyPayment);
+// ---------------------------------------------------------------------------
 
-  function addEntry() {
-    const amount = parseFloat(entry.amount);
-    const isRate = entry.type === "rate_change";
-    if (!isRate && !(amount > 0)) return;
-    patch({
-      entries: [...(acc.entries || []), {
-        ...entry,
-        amount: isRate ? 0 : amount,
-        rate: isRate ? parseFloat(entry.rate) || 0 : 0,
-      }],
-    });
-    setEntry(newLoanEntry(entry.type));
-  }
-  const removeEntry = (id) => patch({ entries: (acc.entries || []).filter((e) => e.id !== id) });
-
-  const rows = showAll ? t.rows.slice().reverse() : t.rows.slice(-12).reverse();
-
+function PropertyDetail({ acc, patch, asOf, accounts }) {
+  const v = valueProperty(acc, { asOf, accounts });
+  const loans = accounts.filter((a) => a.kind === "mortgage" || a.kind === "loan");
   return (
     <div className="stack-sm">
-      <div className="grid-4">
-        <Metric label="当前欠款" value={formatMoney(t.balance, currency)} tone="neg"
-          sub={`已计息 ${t.monthsAccrued} 个月 · 当前利率 ${pct(t.rate)}`} />
-        <Metric label="累计利息" value={formatMoney(t.totalInterest, currency)} tone="neg" />
-        <Metric label="累计还款" value={formatMoney(t.totalPaid, currency)}
-          sub={`其中本金 ${formatMoney(Math.max(0, t.principalRepaid), currency)}`} />
-        <Metric label={`下次计息（${t.nextAccrualDate || "—"}）`}
-          value={formatMoney(t.nextAccrualInterest, currency)} tone="neg"
-          sub={`每月 ${acc.accrualDay || 1} 号自动加一个月利息`} />
-      </div>
-
-      {t.balance > 0 && (Number(acc.monthlyPayment) || 0) > 0 && (
-        payoff.enough ? (
-          <div className="tiny faint">
-            按当前月供 {formatMoney(acc.monthlyPayment, currency)} 继续还，还需 {payoff.months} 个月
-            （约 {(payoff.months / 12).toFixed(1)} 年，到 {addMonthsISO(asOf, payoff.months)}），
-            期间还要付利息 {formatMoney(payoff.totalInterest, currency)}。
-          </div>
-        ) : (
-          <Note tone="warn">月供还不够覆盖每月利息，这样下去余额只会越滚越大。</Note>
-        )
-      )}
-
-      <div className="card-title" style={{ marginTop: 6 }}>记一笔</div>
       <div className="grid-form">
-        <Field label="类型">
-          <select className="select" value={entry.type} onChange={(e) => setEntry({ ...entry, type: e.target.value })}>
-            <option value="payment">还款</option>
-            <option value="drawdown">追加提款</option>
-            <option value="rate_change">利率变更</option>
-            <option value="set_balance">余额校准</option>
+        <Field label="当前估值">
+          <input className="input num" type="number" step="0.01" value={acc.value ?? 0}
+            onChange={(e) => patch({ value: e.target.value })} />
+        </Field>
+        <Field label="估值日期">
+          <input className="input" type="date" value={acc.valuationDate || ""}
+            onChange={(e) => patch({ valuationDate: e.target.value })} />
+        </Field>
+        <Field label="购入价">
+          <input className="input num" type="number" step="0.01" value={acc.purchasePrice ?? 0}
+            onChange={(e) => patch({ purchasePrice: e.target.value })} />
+        </Field>
+        <Field label="购入日期">
+          <input className="input" type="date" value={acc.purchaseDate || ""}
+            onChange={(e) => patch({ purchaseDate: e.target.value })} />
+        </Field>
+        <Field label="关联的贷款">
+          <select className="select" value={acc.linkedLoanId || ""}
+            onChange={(e) => patch({ linkedLoanId: e.target.value || null })}>
+            <option value="">不关联</option>
+            {loans.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         </Field>
-        <Field label="日期">
-          <input className="input" type="date" value={entry.date}
-            onChange={(e) => setEntry({ ...entry, date: e.target.value })} />
-        </Field>
-        {entry.type === "rate_change" ? (
-          <Field label="新年利率 %">
-            <input className="input num" type="number" step="0.01" value={entry.rate}
-              onChange={(e) => setEntry({ ...entry, rate: e.target.value })} />
-          </Field>
-        ) : (
-          <Field label={entry.type === "set_balance" ? "校准后的余额" : "金额"}>
-            <input className="input num" type="number" step="0.01" value={entry.amount || ""}
-              onChange={(e) => setEntry({ ...entry, amount: e.target.value })} />
-          </Field>
-        )}
-        <Field label="备注">
-          <input className="input" value={entry.note} placeholder="可留空"
-            onChange={(e) => setEntry({ ...entry, note: e.target.value })} />
-        </Field>
       </div>
-      <div className="row">
-        <button className="btn btn-primary btn-sm" onClick={addEntry}><Plus size={13} />记入</button>
-        <span className="tiny faint">利息不用记 —— 每月 {acc.accrualDay || 1} 号的利息是按利率自动算出来的。</span>
+      <div className="grid-4">
+        <Metric label="当前估值" value={formatMoney(v.value, acc.currency)}
+          sub={v.valuationDate ? `估于 ${v.valuationDate}` : ""} />
+        <Metric label="账面盈亏" tone={v.gain > 0 ? "pos" : v.gain < 0 ? "neg" : ""}
+          value={v.gain === null ? "—" : formatMoney(v.gain, acc.currency, { forceSign: true })}
+          sub={v.gainPct === null ? "填了购入价才能算" : `${v.gainPct > 0 ? "+" : ""}${v.gainPct.toFixed(1)}%`} />
+        <Metric label="未偿贷款" tone="neg"
+          value={v.loanBalance === null ? "—" : formatMoney(v.loanBalance, acc.currency)}
+          sub={v.loanName || "没有关联贷款"} />
+        <Metric label="净权益" value={v.equity === null ? "—" : formatMoney(v.equity, acc.currency)}
+          sub="估值 − 贷款余额" />
       </div>
+      <div className="tiny faint">
+        房子按你填的估值算，不会自己变 —— 隔一段时间照挂牌价或银行估值更新一次就好。
+        关联贷款之后，这里的净权益会跟着贷款余额每月自动走。
+      </div>
+    </div>
+  );
+}
 
-      {t.rows.length > 0 && (
-        <div className="table-wrap">
-          <table className="tbl">
-            <thead>
-              <tr><th>日期</th><th>项目</th><th className="ta-r">金额</th><th className="ta-r">之后余额</th><th></th></tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.id || `${r.type}-${r.date}-${i}`}>
-                  <td className="num nowrap">{r.date}</td>
-                  <td className="nowrap">
-                    {LOAN_ENTRY_LABELS[r.type] || r.type}
-                    {r.type === "rate_change" ? ` → ${pct(r.rate)}` : ""}
-                    {r.note ? <span className="faint small"> · {r.note}</span> : null}
-                    {r.short ? <span className="warn small"> · 超出余额部分未计入</span> : null}
-                  </td>
-                  <td className={`ta-r num nowrap ${r.type === "interest" || r.type === "drawdown" ? "neg" : r.type === "payment" ? "pos" : ""}`}>
-                    {r.type === "rate_change" ? "—" : formatMoney(r.amount, currency)}
-                  </td>
-                  <td className="ta-r num nowrap">{formatMoney(r.balance, currency)}</td>
-                  <td>
-                    {r.type !== "interest" && (
-                      <button className="btn-icon" onClick={() => removeEntry(r.id)}><Trash2 size={13} /></button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {t.rows.length > 12 && (
-        <button className="btn btn-sm" onClick={() => setShowAll(!showAll)}>
-          <RefreshCw size={12} />{showAll ? "只看最近 12 条" : `显示全部 ${t.rows.length} 条`}
-        </button>
-      )}
+function VehicleDetail({ acc, patch, asOf }) {
+  const v = valueVehicle(acc, asOf);
+  return (
+    <div className="stack-sm">
+      <div className="grid-form">
+        <Field label={v.depreciated ? "当前估值（自动折旧中）" : "当前估值"}>
+          <input className="input num" type="number" step="0.01" value={acc.value ?? 0}
+            disabled={v.depreciated} onChange={(e) => patch({ value: e.target.value })} />
+        </Field>
+        <Field label="购入价">
+          <input className="input num" type="number" step="0.01" value={acc.purchasePrice ?? 0}
+            onChange={(e) => patch({ purchasePrice: e.target.value })} />
+        </Field>
+        <Field label="购入日期">
+          <input className="input" type="date" value={acc.purchaseDate || ""}
+            onChange={(e) => patch({ purchaseDate: e.target.value })} />
+        </Field>
+        <Field label="COE 到期日">
+          <input className="input" type="date" value={acc.coeExpiry || ""}
+            onChange={(e) => patch({ coeExpiry: e.target.value })} />
+        </Field>
+        <Field label="到期残值">
+          <input className="input num" type="number" step="0.01" value={acc.residualValue ?? 0}
+            onChange={(e) => patch({ residualValue: e.target.value })} />
+        </Field>
+      </div>
+      <label className="check">
+        <input type="checkbox" checked={!!acc.autoDepreciate}
+          onChange={(e) => patch({ autoDepreciate: e.target.checked })} />
+        按 COE 到期日直线折旧（从购入价到残值），不用自己改估值
+      </label>
+      <div className="grid-4">
+        <Metric label="当前估值" value={formatMoney(v.value, acc.currency)}
+          sub={v.depreciated ? "按 COE 剩余年限自动折算" : v.valuationDate ? `估于 ${v.valuationDate}` : "手动填写"} />
+        <Metric label="购入价" value={formatMoney(v.purchasePrice, acc.currency)} />
+        <Metric label="累计折损" tone="neg"
+          value={v.loss === null ? "—" : formatMoney(v.loss, acc.currency, { forceSign: true })}
+          sub={v.lossPct === null ? "" : `${v.lossPct.toFixed(1)}%`} />
+        <Metric label="COE 到期"
+          value={v.coeExpiry || "—"} tone={v.daysToCoeExpiry !== null && v.daysToCoeExpiry <= 180 ? "warn" : ""}
+          sub={v.daysToCoeExpiry === null ? "" : v.daysToCoeExpiry > 0
+            ? `还有 ${(v.daysToCoeExpiry / 365).toFixed(1)} 年` : "已到期"} />
+      </div>
+      <div className="tiny faint">
+        新加坡的车到 COE 到期基本只剩报废价，所以直线折旧比一个两年没动过的估值更接近现实。
+        当然，真要卖的时候以实际报价为准。
+      </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
 
-export default function AccountDetail({ account, quotes, patch, setQuote, currencies, asOf = todayISO() }) {
+export default function AccountDetail({ account, quotes, patch, setQuote, currencies, accounts = [], asOf = todayISO() }) {
   switch (account.kind) {
     case "cash":
       return <CashDetail acc={account} />;
@@ -390,9 +370,13 @@ export default function AccountDetail({ account, quotes, patch, setQuote, curren
       return <BrokerageDetail acc={account} quotes={quotes} patch={patch} setQuote={setQuote} currencies={currencies} />;
     case "cpf":
       return <CpfDetail acc={account} patch={patch} asOf={asOf} />;
+    case "property":
+      return <PropertyDetail acc={account} patch={patch} asOf={asOf} accounts={accounts} />;
+    case "vehicle":
+      return <VehicleDetail acc={account} patch={patch} asOf={asOf} />;
     case "mortgage":
     case "loan":
-      return <LoanDetail acc={account} patch={patch} asOf={asOf} currency={account.currency} />;
+      return <LoanLedger account={account} patch={patch} asOf={asOf} />;
     default:
       return null;
   }
