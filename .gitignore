@@ -1,0 +1,5 @@
+node_modules
+dist
+tests/.app.cjs
+.DS_Store
+*.local
