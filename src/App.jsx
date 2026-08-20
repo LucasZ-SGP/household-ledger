@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   PieChart as PieIcon, Upload as UploadIcon, AlertCircle, List, Landmark,
-  Coins, Settings as SettingsIcon, Menu, Cloud, CloudOff, Loader2,
+  Coins, Settings as SettingsIcon, Menu, Cloud, CloudOff, Loader2, Wallet,
   CheckCircle2, Save, RefreshCw,
 } from "lucide-react";
 import { Note, ConfirmBar } from "./components/ui.jsx";
@@ -10,19 +10,25 @@ import UploadView from "./views/Upload.jsx";
 import Review from "./views/Review.jsx";
 import Transactions from "./views/Transactions.jsx";
 import NetWorth from "./views/NetWorth.jsx";
+import Assets from "./views/Assets.jsx";
 import Categories from "./views/Categories.jsx";
 import Settings from "./views/Settings.jsx";
 import { freshState, normalizeState } from "./lib/model.js";
 import { loadLedger, saveLedger } from "./lib/github.js";
+import { EMPTY_QUOTE_CFG } from "./lib/quotes.js";
 
 const CFG_KEY = "ledger.github.config";
 const CACHE_KEY = "ledger.cache";
+// The market-data key lives beside the GitHub token — on this device only,
+// never in the ledger file that gets committed.
+const QUOTE_CFG_KEY = "ledger.quotes.config";
 
 const NAV = [
   { id: "dashboard", label: "总览", icon: PieIcon },
   { id: "upload", label: "导入账单", icon: UploadIcon },
   { id: "review", label: "待确认", icon: AlertCircle },
   { id: "transactions", label: "交易记录", icon: List },
+  { id: "assets", label: "资产负债", icon: Wallet },
   { id: "networth", label: "净资产", icon: Landmark },
   { id: "categories", label: "分类与规则", icon: Coins },
   { id: "settings", label: "设置", icon: SettingsIcon },
@@ -36,6 +42,15 @@ function readCfg() {
     return raw ? { ...EMPTY_CFG, ...JSON.parse(raw) } : { ...EMPTY_CFG };
   } catch {
     return { ...EMPTY_CFG };
+  }
+}
+
+function readQuoteCfg() {
+  try {
+    const raw = localStorage.getItem(QUOTE_CFG_KEY);
+    return raw ? { ...EMPTY_QUOTE_CFG, ...JSON.parse(raw) } : { ...EMPTY_QUOTE_CFG };
+  } catch {
+    return { ...EMPTY_QUOTE_CFG };
   }
 }
 
@@ -55,6 +70,7 @@ export default function App() {
   const [drawer, setDrawer] = useState(false);
 
   const [cfg, setCfgState] = useState(readCfg);
+  const [quoteCfg, setQuoteCfgState] = useState(readQuoteCfg);
   const cached = useRef(readCache()).current;
 
   const [data, setDataRaw] = useState(() => (cached ? cached.state : freshState()));
@@ -77,6 +93,11 @@ export default function App() {
   const setCfg = useCallback((next) => {
     setCfgState(next);
     try { localStorage.setItem(CFG_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+  }, []);
+
+  const setQuoteCfg = useCallback((next) => {
+    setQuoteCfgState(next);
+    try { localStorage.setItem(QUOTE_CFG_KEY, JSON.stringify(next)); } catch { /* private mode */ }
   }, []);
 
   // Local cache is a crash-guard only — GitHub remains the source of truth.
@@ -269,10 +290,16 @@ export default function App() {
           {tab === "upload" && <UploadView data={data} setData={setData} goToReview={() => setTab("review")} />}
           {tab === "review" && <Review data={data} setData={setData} />}
           {tab === "transactions" && <Transactions data={data} setData={setData} />}
+          {tab === "assets" && (
+            <Assets data={data} setData={setData} quoteCfg={quoteCfg} goToSettings={() => setTab("settings")} />
+          )}
           {tab === "networth" && <NetWorth data={data} setData={setData} />}
           {tab === "categories" && <Categories data={data} setData={setData} />}
           {tab === "settings" && (
-            <Settings data={data} setData={setData} cfg={cfg} setCfg={setCfg} onReload={() => load()} />
+            <Settings
+              data={data} setData={setData} cfg={cfg} setCfg={setCfg}
+              quoteCfg={quoteCfg} setQuoteCfg={setQuoteCfg} onReload={() => load()}
+            />
           )}
         </div>
       </div>

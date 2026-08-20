@@ -162,7 +162,7 @@ await step("starts unconfigured with a warning to connect GitHub", () => {
 });
 
 await step("all nav tabs render without crashing", async () => {
-  for (const label of ["总览", "导入账单", "待确认", "交易记录", "净资产", "分类与规则", "设置"]) {
+  for (const label of ["总览", "导入账单", "待确认", "交易记录", "资产负债", "净资产", "分类与规则", "设置"]) {
     await click(label);
     assert.ok(text().length > 100, `tab ${label} rendered empty`);
   }
@@ -308,6 +308,113 @@ await step("savings rate is computed", () => {
   assert.match(text(), /48%/);
 });
 
+// ---------- assets & liabilities ----------
+await step("the assets tab starts empty with a prompt to add an account", async () => {
+  await click("资产负债");
+  assert.ok(text().includes("还没有任何资产或负债"), "expected the empty state");
+});
+
+await step("a fixed deposit auto-fills its maturity date from the term", async () => {
+  await click("银行定期");
+  const nameInput = inputByPlaceholder("银行定期");
+  await type(nameInput, "OCBC 12个月定期");
+  const dates = Array.from(container.querySelectorAll('input[type="date"]'));
+  await type(dates[0], "2026-01-01");           // 起息日
+  const numbers = Array.from(container.querySelectorAll('input[type="number"]'));
+  await type(numbers[0], "100000");             // 本金
+  await type(numbers[1], "3.65");               // 年利率
+  await type(numbers[2], "12");                 // 存期
+  const maturity = Array.from(container.querySelectorAll('input[type="date"]'))[1];
+  assert.equal(maturity.value, "2027-01-01", "maturity should follow the term");
+  await click("添加账户");
+  assert.ok(text().includes("OCBC 12个月定期"), "account not listed");
+});
+
+await step("the deposit shows principal plus interest accrued to today", async () => {
+  // Started 2026-01-01 at 3.65% simple; the app values it as of today.
+  const body = text();
+  assert.ok(body.includes("S$100,000.00"), "principal missing");
+  assert.ok(body.includes("2027-01-01"), "maturity date missing");
+  assert.match(body, /还有 \d+ 天/, "expected a countdown to maturity");
+});
+
+await step("a mortgage accrues one month of interest on the 1st, every month", async () => {
+  await click("房贷");
+  await type(inputByPlaceholder("房贷"), "HDB 房贷");
+  const numbers = Array.from(container.querySelectorAll('input[type="number"]'));
+  await type(numbers[0], "500000");   // 放款金额
+  await type(numbers[1], "3");        // 年利率
+  const dates = Array.from(container.querySelectorAll('input[type="date"]'));
+  await type(dates[0], "2026-01-01"); // 放款日
+  await click("添加账户");
+  assert.ok(text().includes("HDB 房贷"), "loan not listed");
+  assert.ok(text().includes("每月 1 号计息"), "expected the accrual-day note");
+});
+
+await step("net worth reflects the loan as a liability", async () => {
+  const body = text();
+  assert.ok(body.includes("负债"), "expected a liability column");
+  // 500k drawn on 2026-01-01 at 3%/12 per month has grown past 500k by now.
+  const owed = body.match(/S\$5[0-9]{2},[0-9]{3}\.[0-9]{2}/);
+  assert.ok(owed, `expected a balance above the 500,000 principal, body had: ${body.match(/S\$[\d,]+\.\d\d/g)}`);
+});
+
+await step("recording a payment reduces the outstanding balance", async () => {
+  // A freshly added account opens expanded, so its detail is already on screen.
+  assert.ok(text().includes("下次计息"), "loan detail should be open after adding");
+
+  const openCard = Array.from(container.querySelectorAll(".card")).find((c) => c.textContent.includes("下次计息"));
+  const before = openCard.textContent.match(/S\$([\d,]+\.\d\d)/)[1];
+  const amount = Array.from(openCard.querySelectorAll('input[type="number"]')).pop();
+  await type(amount, "2500");
+  await click("记入");
+  const after = Array.from(container.querySelectorAll(".card"))
+    .find((c) => c.textContent.includes("下次计息")).textContent.match(/S\$([\d,]+\.\d\d)/)[1];
+  assert.notEqual(before, after, "balance should move after a payment");
+  assert.ok(parseFloat(after.replace(/,/g, "")) < parseFloat(before.replace(/,/g, "")), "payment should reduce the balance");
+});
+
+await step("a brokerage holding values at quantity x price once a price is known", async () => {
+  await click("股票账户");
+  await type(inputByPlaceholder("股票账户"), "IBKR");
+  await click("添加账户");
+
+  const card = Array.from(container.querySelectorAll(".card")).find((c) => c.textContent.includes("IBKR"));
+  const addHolding = Array.from(card.querySelectorAll("button")).find((b) => b.textContent.includes("添加持仓"));
+  await act(async () => { addHolding.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(60); });
+
+  const fresh = Array.from(container.querySelectorAll(".card")).find((c) => c.textContent.includes("IBKR"));
+  await type(fresh.querySelector('input[placeholder="QQQ"]'), "QQQ");
+  // The first number input on the card is the account's cash; quantity lives in the table.
+  await type(fresh.querySelector('table input[type="number"]'), "50");
+  assert.match(text(), /还没有 QQQ 的价格/, "a price-less holding must say so rather than count as zero");
+
+  // Manual price entry — the fallback that works with no market-data provider.
+  const pencil = Array.from(fresh.querySelectorAll("button")).find((b) => b.getAttribute("title") === "手动改价");
+  await act(async () => { pencil.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(60); });
+  const saveBtn = Array.from(container.querySelectorAll("button")).find((b) => b.getAttribute("title") === "保存价格");
+  assert.ok(saveBtn, "price editor did not open");
+  await type(saveBtn.parentElement.querySelector('input[type="number"]'), "500");
+  await act(async () => {
+    Array.from(container.querySelectorAll("button")).find((b) => b.getAttribute("title") === "保存价格")
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flush(60);
+  });
+  assert.ok(text().includes("$25,000.00"), `50 x 500 should be 25,000; body had ${text().match(/\$[\d,]+\.\d\d/g)}`);
+});
+
+await step("a snapshot can be generated from the live account values", async () => {
+  await click("生成净资产快照");
+  assert.match(text(), /已把今天的资产负债写入净资产快照/);
+  await click("净资产");
+  assert.ok(text().includes("账户合计（自动）"), "snapshot rows did not reach the net-worth page");
+});
+
+await step("accounts and prices survive a round-trip through the ledger file", async () => {
+  await click("资产负债");
+  assert.ok(text().includes("OCBC 12个月定期") && text().includes("HDB 房贷") && text().includes("IBKR"));
+});
+
 // ---------- saving ----------
 await step("dirty state is flagged before saving", () => {
   assert.ok(text().includes("有未保存的修改"), "expected dirty indicator");
@@ -329,6 +436,11 @@ await step("saved payload is valid UTF-8 JSON with Chinese intact", () => {
   assert.ok(names.includes("人情往来（红包/礼金）"), "seed Chinese category corrupted");
   assert.ok(names.includes("自定义杂项"), "user-created category missing");
   assert.ok(parsed.rules.some((r) => r.pattern === "WEIRD ABBREV POS 4471"), "learned rule not persisted");
+  assert.equal(parsed.accounts.length, 3, "accounts not persisted");
+  const loan = parsed.accounts.find((a) => a.kind === "mortgage");
+  assert.equal(loan.entries.length, 1, "the recorded payment should be in the file");
+  assert.equal(parsed.quotes.QQQ.price, 500, "the last known price should travel with the ledger");
+  assert.equal(parsed.schemaVersion, 2);
 });
 
 await step("second save sends the updated sha and succeeds", async () => {
