@@ -3,7 +3,7 @@
 // Everything here is framework-free so it can be unit-tested directly in node.
 // ---------------------------------------------------------------------------
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const CURRENCY_META = {
   SGD: { label: "新加坡元", symbol: "S$", accent: "#2F6F5E" },
@@ -110,6 +110,8 @@ export function freshState() {
     rules: SEED_RULES.map((r) => ({ id: uid(), ...r })),
     transactions: [],
     netWorthEntries: [],
+    accounts: [],
+    quotes: {},
     lastAccount: "",
   };
 }
@@ -131,7 +133,32 @@ export function normalizeState(parsed) {
     rules: Array.isArray(parsed.rules) ? parsed.rules : base.rules,
     transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
     netWorthEntries: Array.isArray(parsed.netWorthEntries) ? parsed.netWorthEntries : [],
+    // v2 added standing positions (accounts) and their last-known prices.
+    accounts: Array.isArray(parsed.accounts) ? parsed.accounts.map(normalizeAccount) : [],
+    quotes: parsed.quotes && typeof parsed.quotes === "object" ? parsed.quotes : {},
   };
+}
+
+// Accounts are edited through free-form inputs, so an older or hand-edited
+// file can carry a string where a number belongs. Coercing here keeps every
+// downstream calculation from having to defend itself.
+function normalizeAccount(acc) {
+  if (!acc || typeof acc !== "object") return acc;
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const out = { ...acc };
+  for (const k of ["balance", "principal", "annualRate", "termMonths", "accrualDay", "monthlyPayment", "cash", "value"]) {
+    if (k in out) out[k] = n(out[k]);
+  }
+  if (Array.isArray(out.holdings)) {
+    out.holdings = out.holdings.map((h) => ({ ...h, quantity: n(h.quantity), costBasis: n(h.costBasis) }));
+  }
+  if (Array.isArray(out.entries)) {
+    out.entries = out.entries.map((e) => ({ ...e, amount: n(e.amount), rate: n(e.rate) }));
+  }
+  if (out.balances && typeof out.balances === "object") {
+    out.balances = Object.fromEntries(Object.entries(out.balances).map(([k, v]) => [k, n(v)]));
+  }
+  return out;
 }
 
 export function formatMoney(amount, currency, opts = {}) {

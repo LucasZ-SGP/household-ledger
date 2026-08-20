@@ -1,16 +1,20 @@
 import React, { useState, useRef } from "react";
-import { X, Download, FileUp, RefreshCw, CheckCircle2, Loader2, History } from "lucide-react";
+import { X, Download, FileUp, RefreshCw, CheckCircle2, Loader2, History, ExternalLink, LineChart } from "lucide-react";
 import { Card, Field, Note, ConfirmBar } from "../components/ui.jsx";
 import { accentFor, freshState, normalizeState } from "../lib/model.js";
 import { verifyAccess, historyUrl } from "../lib/github.js";
+import { QUOTE_PROVIDERS, providerMeta, fetchQuote } from "../lib/quotes.js";
 
-export default function Settings({ data, setData, cfg, setCfg, onReload }) {
+export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuoteCfg, onReload }) {
   const [form, setForm] = useState(cfg);
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
   const [newCcy, setNewCcy] = useState("");
   const [confirmReset, setConfirmReset] = useState(false);
+  const [quoteTest, setQuoteTest] = useState(null);
+  const [testing, setTesting] = useState(false);
   const fileRef = useRef(null);
+  const provider = providerMeta(quoteCfg?.provider);
 
   async function saveConnection() {
     setChecking(true);
@@ -41,10 +45,25 @@ export default function Settings({ data, setData, cfg, setCfg, onReload }) {
   }
 
   function removeCurrency(c) {
-    const inUse = data.transactions.some((t) => t.currency === c)
-      || data.netWorthEntries.some((e) => e.currency === c);
+    const inUse = currencyInUse(c);
     if (inUse || data.currencies.length <= 1) return;
     setData((prev) => ({ ...prev, currencies: prev.currencies.filter((x) => x !== c) }));
+  }
+
+  // A real round-trip against the real endpoint — the only way to find out
+  // whether this browser can reach that host without being blocked.
+  async function testQuote() {
+    setTesting(true);
+    setQuoteTest(null);
+    try {
+      const symbol = quoteCfg.provider === "stooq" ? "qqq.us" : "QQQ";
+      const q = await fetchQuote(symbol, quoteCfg);
+      setQuoteTest({ ok: true, message: `取到 ${q.symbol} = ${q.price}${q.currency ? " " + q.currency : ""}（${String(q.asOf || "").slice(0, 10) || "刚刚"}）` });
+    } catch (e) {
+      setQuoteTest({ ok: false, message: e.message });
+    } finally {
+      setTesting(false);
+    }
   }
 
   function exportJson() {
@@ -70,7 +89,9 @@ export default function Settings({ data, setData, cfg, setCfg, onReload }) {
   }
 
   const currencyInUse = (c) =>
-    data.transactions.some((t) => t.currency === c) || data.netWorthEntries.some((e) => e.currency === c);
+    data.transactions.some((t) => t.currency === c)
+    || data.netWorthEntries.some((e) => e.currency === c)
+    || (data.accounts || []).some((a) => a.currency === c || (a.holdings || []).some((h) => h.currency === c));
 
   return (
     <div className="stack narrow">
@@ -121,6 +142,57 @@ export default function Settings({ data, setData, cfg, setCfg, onReload }) {
         <Note tone="warn">
           Token 请用 fine-grained 类型，Repository access 只勾选这一个仓库，
           权限只给 <b>Contents: Read and write</b>。这样即使泄露，影响也仅限于这个账本仓库。
+        </Note>
+      </Card>
+
+      <Card className="stack-sm">
+        <div className="card-title"><LineChart size={13} style={{ verticalAlign: -2, marginRight: 4 }} />行情数据源（股票价格）</div>
+        <div className="tiny faint">
+          「资产负债」页里的持仓靠这个自动取价。因为整个应用没有后端，请求是从你的浏览器直接发出去的 ——
+          行情源必须允许跨域访问才能用。取不到也不影响记账：可以在持仓里直接手填价格。
+        </div>
+        <div className="grid-form">
+          <Field label="行情源">
+            <select className="select" value={quoteCfg?.provider || "manual"}
+              onChange={(e) => { setQuoteCfg({ ...quoteCfg, provider: e.target.value }); setQuoteTest(null); }}>
+              {QUOTE_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </Field>
+          {provider.needsKey && (
+            <Field label="API Key">
+              <input className="input" type="password" value={quoteCfg?.apiKey || ""} placeholder="粘贴 API Key"
+                onChange={(e) => setQuoteCfg({ ...quoteCfg, apiKey: e.target.value.trim() })} />
+            </Field>
+          )}
+        </div>
+        <div className="tiny faint">{provider.blurb}</div>
+        {provider.signup && (
+          <a className="link tiny" href={provider.signup} target="_blank" rel="noreferrer">
+            去申请免费 Key <ExternalLink size={10} style={{ verticalAlign: -1 }} />
+          </a>
+        )}
+        {quoteCfg?.provider !== "manual" && (
+          <>
+            <Field label="代理地址（可选）">
+              <input className="input" value={quoteCfg?.proxy || ""} placeholder="https://your-worker.workers.dev/?url={url}"
+                onChange={(e) => setQuoteCfg({ ...quoteCfg, proxy: e.target.value.trim() })} />
+            </Field>
+            <div className="tiny faint">
+              只有在行情源被浏览器以跨域为由拦下时才需要。写成 <span className="mono-inline">{"https://…/?url={url}"}</span> 会把
+              目标地址编码后填进 <span className="mono-inline">{"{url}"}</span>；不带占位符则直接当前缀拼接。
+              注意代理方能看到你查了哪些股票代码，最好用自己部署的。
+            </div>
+            <div className="row">
+              <button className="btn" onClick={testQuote} disabled={testing}>
+                {testing ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} />}
+                {testing ? "测试中…" : "用 QQQ 测一下"}
+              </button>
+            </div>
+            {quoteTest && <Note tone={quoteTest.ok ? "info" : "error"}>{quoteTest.message}</Note>}
+          </>
+        )}
+        <Note tone="warn">
+          API Key 和 GitHub Token 一样只存在这台设备的浏览器里，不会写进账本文件、也不会提交到仓库。
         </Note>
       </Card>
 
