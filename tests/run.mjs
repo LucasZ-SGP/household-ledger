@@ -3,6 +3,7 @@ import { runGitHubTests } from "./github.mjs";
 import { runOcbcTests } from "./ocbc.mjs";
 import { runAssetTests } from "./assets.mjs";
 import { runQuoteTests } from "./quotes.mjs";
+import { runLoanStatementTests } from "./loanstatement.mjs";
 
 const pending = [];
 const t = (name, fn) => pending.push({ name, fn });
@@ -12,6 +13,7 @@ runGitHubTests(t);
 runOcbcTests(t);
 runAssetTests(t);
 runQuoteTests(t);
+runLoanStatementTests(t);
 
 let pass = 0, fail = 0;
 const lines = [];
