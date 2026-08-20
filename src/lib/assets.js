@@ -113,17 +113,12 @@ export function newAccount(kind, currency = "SGD") {
       };
     case "other_asset":
       return { ...base, value: 0, asOf: today };
+    // Physical things are recorded by name, not by price. Any number you put on
+    // a house or a car is a guess that goes stale quietly, and a stale guess
+    // sitting inside a net-worth total is worse than no number at all.
     case "property":
-      return {
-        ...base, purchasePrice: 0, purchaseDate: today,
-        value: 0, valuationDate: today, linkedLoanId: null,
-      };
     case "vehicle":
-      return {
-        ...base, purchasePrice: 0, purchaseDate: today,
-        value: 0, valuationDate: today,
-        coeExpiry: addMonthsISO(today, 120), residualValue: 0, autoDepreciate: false,
-      };
+      return { ...base, description: "" };
     case "mortgage":
     case "loan":
       return {
@@ -137,7 +132,7 @@ export function newAccount(kind, currency = "SGD") {
 }
 
 export function newHolding(currency = "USD") {
-  return { id: uid(), symbol: "", quantity: 0, currency, costBasis: 0 };
+  return { id: uid(), symbol: "", quantity: 0, currency };
 }
 
 export function newLoanEntry(type = "payment") {
@@ -517,28 +512,45 @@ export function normalizeSymbol(s) {
  * reported in `missing` and contributes nothing, rather than silently counting
  * as zero inside a total that looks complete.
  */
+/**
+ * Idle cash in a brokerage account, as a currency -> amount map. A single
+ * account routinely holds several currencies at once, so one number and one
+ * account-level currency cannot describe it.
+ */
+export function cashOf(acc) {
+  if (acc.cashByCurrency && typeof acc.cashByCurrency === "object") {
+    const out = {};
+    for (const [ccy, amt] of Object.entries(acc.cashByCurrency)) {
+      const v = num(amt);
+      if (v) out[ccy] = v;
+    }
+    return out;
+  }
+  // Pre-multi-currency accounts stored one number against the account currency.
+  const legacy = num(acc.cash);
+  return legacy ? { [acc.currency]: legacy } : {};
+}
+
 export function valueBrokerage(acc, quotes = {}, asOfISO = todayISO()) {
   const byCurrency = {};
   const add = (ccy, amt) => { byCurrency[ccy] = (byCurrency[ccy] || 0) + amt; };
-  const cash = num(acc.cash);
-  if (cash) add(acc.currency, cash);
+
+  const cash = cashOf(acc);
+  for (const [ccy, amt] of Object.entries(cash)) add(ccy, amt);
 
   const missing = [];
   const rows = (acc.holdings || []).map((h) => {
     const symbol = normalizeSymbol(h.symbol);
     const quote = quotes[symbol] || null;
     const qty = num(h.quantity);
+    // The quote's own currency wins: a price is denominated by whoever quoted it.
     const ccy = quote?.currency || h.currency || acc.currency;
     const price = quote ? num(quote.price) : null;
     const value = price === null ? null : price * qty;
-    const cost = num(h.costBasis) * qty;
     if (price === null && symbol) missing.push(symbol);
     if (value !== null) add(ccy, value);
     return {
       ...h, symbol, quantity: qty, currency: ccy, price, value,
-      cost: cost || null,
-      gain: value !== null && cost ? value - cost : null,
-      gainPct: value !== null && cost ? ((value - cost) / cost) * 100 : null,
       quoteAsOf: quote?.asOf || null,
       quoteSource: quote?.source || null,
       stale: quote?.asOf ? daysBetween(String(quote.asOf).slice(0, 10), asOfISO) > 4 : false,
@@ -550,63 +562,20 @@ export function valueBrokerage(acc, quotes = {}, asOfISO = todayISO()) {
 }
 
 // ---------------------------------------------------------------------------
-// Physical assets — a house or a car is worth what you say it is worth, so the
-// job here is mostly bookkeeping around that number rather than pricing it.
+// Physical assets — listed, not valued.
 // ---------------------------------------------------------------------------
 
-/**
- * A car loses value on a schedule you can actually predict in Singapore: the
- * COE runs out on a known date and the car is worth roughly its scrap value
- * then. Straight line between purchase and that date is crude but honest, and
- * it beats a number last touched two years ago. Off by default.
- */
-export function valueVehicle(acc, asOfISO = todayISO()) {
-  const purchasePrice = num(acc.purchasePrice);
-  const residual = num(acc.residualValue);
-  const manual = num(acc.value);
-  const expiry = isISODate(acc.coeExpiry) ? acc.coeExpiry : null;
-  const bought = isISODate(acc.purchaseDate) ? acc.purchaseDate : null;
+export const PHYSICAL_KINDS = ["property", "vehicle"];
 
-  let value = manual;
-  let depreciated = false;
-  if (acc.autoDepreciate && expiry && bought && expiry > bought && purchasePrice > 0) {
-    const total = daysBetween(bought, expiry);
-    const elapsed = Math.min(Math.max(0, daysBetween(bought, asOfISO)), total);
-    value = round2(purchasePrice - (purchasePrice - residual) * (elapsed / total));
-    depreciated = true;
-  }
-  return {
-    value,
-    purchasePrice,
-    depreciated,
-    coeExpiry: expiry,
-    daysToCoeExpiry: expiry ? daysBetween(asOfISO, expiry) : null,
-    loss: purchasePrice ? value - purchasePrice : null,
-    lossPct: purchasePrice ? ((value - purchasePrice) / purchasePrice) * 100 : null,
-    valuationDate: acc.valuationDate || null,
-  };
+export function isPhysical(kind) {
+  return PHYSICAL_KINDS.includes(kind);
 }
 
-/**
- * A property's own number, plus the equity left once the loan against it is
- * paid off. Linking the mortgage is what turns two numbers into the one that
- * actually matters.
- */
-export function valueProperty(acc, { asOf = todayISO(), accounts = [] } = {}) {
-  const purchasePrice = num(acc.purchasePrice);
-  const value = num(acc.value);
-  const loan = acc.linkedLoanId ? accounts.find((a) => a.id === acc.linkedLoanId) : null;
-  const loanBalance = loan ? loanTimeline(loan, asOf).balance : null;
-  return {
-    value,
-    purchasePrice,
-    gain: purchasePrice ? value - purchasePrice : null,
-    gainPct: purchasePrice ? ((value - purchasePrice) / purchasePrice) * 100 : null,
-    loanName: loan ? loan.name : null,
-    loanBalance,
-    equity: loanBalance === null ? null : round2(value - loanBalance),
-    valuationDate: acc.valuationDate || null,
-  };
+/** The physical things on the books, for the overview to name. */
+export function physicalAssets(accounts = []) {
+  return accounts
+    .filter((a) => isPhysical(a.kind) && !a.archived)
+    .map((a) => ({ id: a.id, kind: a.kind, name: a.name, description: a.description || a.note || "" }));
 }
 
 // ---------------------------------------------------------------------------
@@ -640,14 +609,10 @@ export function valueAccount(acc, { asOf = todayISO(), quotes = {}, accounts = [
       const detail = cpfInterest(acc, asOf);
       return { side, byCurrency: one(detail.total), detail };
     }
-    case "property": {
-      const detail = valueProperty(acc, { asOf, accounts });
-      return { side, byCurrency: one(detail.value), detail };
-    }
-    case "vehicle": {
-      const detail = valueVehicle(acc, asOf);
-      return { side, byCurrency: one(detail.value), detail };
-    }
+    case "property":
+    case "vehicle":
+      // Deliberately no amount: these are recorded, not valued.
+      return { side, byCurrency: {}, detail: { description: acc.description || "" } };
     case "mortgage":
     case "loan": {
       const detail = loanTimeline(acc, asOf);
@@ -725,14 +690,6 @@ export function accountAlerts(accounts = [], { asOf = todayISO(), quotes = {} } 
         alerts.push({ tone: "warn", accountId: acc.id, message: `「${acc.name || "定期存款"}」已于 ${v.maturityDate} 到期，记得转存或续做。` });
       } else if (v.daysToMaturity !== null && v.daysToMaturity <= 30) {
         alerts.push({ tone: "info", accountId: acc.id, message: `「${acc.name || "定期存款"}」还有 ${v.daysToMaturity} 天到期（${v.maturityDate}）。` });
-      }
-    }
-    if (acc.kind === "vehicle" && isISODate(acc.coeExpiry)) {
-      const left = daysBetween(asOf, acc.coeExpiry);
-      if (left <= 0) {
-        alerts.push({ tone: "warn", accountId: acc.id, message: `「${acc.name || "汽车"}」的 COE 已于 ${acc.coeExpiry} 到期。` });
-      } else if (left <= 180) {
-        alerts.push({ tone: "info", accountId: acc.id, message: `「${acc.name || "汽车"}」的 COE 还有 ${left} 天到期（${acc.coeExpiry}）。` });
       }
     }
     if (acc.kind === "mortgage" || acc.kind === "loan") {

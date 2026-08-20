@@ -150,7 +150,17 @@ function normalizeAccount(acc) {
     if (k in out) out[k] = n(out[k]);
   }
   if (Array.isArray(out.holdings)) {
-    out.holdings = out.holdings.map((h) => ({ ...h, quantity: n(h.quantity), costBasis: n(h.costBasis) }));
+    out.holdings = out.holdings.map(({ costBasis, ...h }) => ({ ...h, quantity: n(h.quantity) }));
+  }
+  // Brokerage cash used to be one number against the account's own currency.
+  if (out.kind === "brokerage" && !out.cashByCurrency) {
+    out.cashByCurrency = n(out.cash) ? { [out.currency]: n(out.cash) } : {};
+    delete out.cash;
+  }
+  if (out.cashByCurrency && typeof out.cashByCurrency === "object") {
+    out.cashByCurrency = Object.fromEntries(
+      Object.entries(out.cashByCurrency).map(([k, v]) => [k, n(v)])
+    );
   }
   if (Array.isArray(out.entries)) {
     out.entries = out.entries.map((e) => ({ ...e, amount: n(e.amount), rate: n(e.rate) }));

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Plus, Trash2, ChevronDown, ChevronRight, RefreshCw, Loader2,
   Landmark, Archive, ArchiveRestore, Camera,
@@ -9,7 +9,7 @@ import {
   ASSET_KINDS, LIABILITY_KINDS, KIND_META, newAccount, valueAccount,
   summarizeAccounts, heldSymbols, snapshotFromAccounts, accountAlerts,
   addMonthsISO, todayISO, sideOf, cpfTotal, valueFixedDeposit, loanTimeline,
-  valueProperty, valueVehicle,
+  isPhysical, physicalAssets, cashOf,
 } from "../lib/assets.js";
 import { fetchQuotes, mergeQuotes, providerMeta } from "../lib/quotes.js";
 import AccountDetail from "./AccountDetail.jsx";
@@ -18,6 +18,8 @@ const ALL_KINDS = [...ASSET_KINDS, ...LIABILITY_KINDS];
 
 // The one number that answers "what is this position worth today", per kind.
 function headlineOf(acc, quotes, asOf) {
+  // Physical things carry no amount, so the headline is words, not money.
+  if (isPhysical(acc.kind)) return { text: "", side: "asset" };
   const v = valueAccount(acc, { asOf, quotes });
   const parts = Object.entries(v.byCurrency).filter(([, amt]) => amt);
   if (!parts.length) return { text: formatMoney(0, acc.currency), side: v.side };
@@ -32,20 +34,11 @@ function subtitleOf(acc, quotes, asOf, accounts = []) {
   }
   if (acc.kind === "brokerage") {
     const n = (acc.holdings || []).length;
-    return `${n} 个持仓${acc.cash ? ` · 现金 ${formatMoney(acc.cash, acc.currency)}` : ""}`;
+    const cash = Object.entries(cashOf(acc)).map(([c, amt]) => formatMoney(amt, c)).join(" + ");
+    return `${n} 个持仓${cash ? ` · 现金 ${cash}` : ""}`;
   }
   if (acc.kind === "cpf") return `OA/SA/MA/RA 合计 ${formatMoney(cpfTotal(acc), acc.currency)}`;
-  if (acc.kind === "property") {
-    const v = valueProperty(acc, { asOf, accounts });
-    return v.equity === null ? "未关联贷款" : `净权益 ${formatMoney(v.equity, acc.currency)}（已扣 ${formatMoney(v.loanBalance, acc.currency)} 贷款）`;
-  }
-  if (acc.kind === "vehicle") {
-    const v = valueVehicle(acc, asOf);
-    if (!v.coeExpiry) return v.depreciated ? "按 COE 自动折旧" : "";
-    return v.daysToCoeExpiry > 0
-      ? `COE ${v.coeExpiry} 到期 · 还有 ${(v.daysToCoeExpiry / 365).toFixed(1)} 年${v.depreciated ? " · 自动折旧" : ""}`
-      : `COE 已于 ${v.coeExpiry} 到期`;
-  }
+  if (isPhysical(acc.kind)) return acc.description || "";
   if (acc.kind === "mortgage" || acc.kind === "loan") {
     const t = loanTimeline(acc, asOf);
     return `年利率 ${t.rate}% · 每月 ${acc.accrualDay || 1} 号计息 · ${t.rows.length} 条记录 · 下次 ${t.nextAccrualDate || "—"}`;
@@ -79,7 +72,7 @@ function AccountForm({ draft, setDraft, currencies }) {
           <input className="input" value={draft.institution || ""} placeholder="OCBC / IBKR / DBS"
             onChange={(e) => set({ institution: e.target.value })} />
         </Field>
-        {draft.kind !== "cpf" && (
+        {draft.kind !== "cpf" && !isPhysical(draft.kind) && (
           <Field label="币种">
             <select className="select" value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
               {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -137,44 +130,6 @@ function AccountForm({ draft, setDraft, currencies }) {
           </Field>
         )}
 
-        {draft.kind === "property" && (
-          <>
-            <Field label="当前估值">
-              <input className="input num" type="number" step="0.01" value={draft.value}
-                onChange={(e) => set({ value: e.target.value })} />
-            </Field>
-            <Field label="购入价">
-              <input className="input num" type="number" step="0.01" value={draft.purchasePrice}
-                onChange={(e) => set({ purchasePrice: e.target.value })} />
-            </Field>
-            <Field label="购入日期">
-              <input className="input" type="date" value={draft.purchaseDate || ""}
-                onChange={(e) => set({ purchaseDate: e.target.value })} />
-            </Field>
-          </>
-        )}
-
-        {draft.kind === "vehicle" && (
-          <>
-            <Field label="当前估值">
-              <input className="input num" type="number" step="0.01" value={draft.value}
-                onChange={(e) => set({ value: e.target.value })} />
-            </Field>
-            <Field label="购入价">
-              <input className="input num" type="number" step="0.01" value={draft.purchasePrice}
-                onChange={(e) => set({ purchasePrice: e.target.value })} />
-            </Field>
-            <Field label="购入日期">
-              <input className="input" type="date" value={draft.purchaseDate || ""}
-                onChange={(e) => set({ purchaseDate: e.target.value })} />
-            </Field>
-            <Field label="COE 到期日">
-              <input className="input" type="date" value={draft.coeExpiry || ""}
-                onChange={(e) => set({ coeExpiry: e.target.value })} />
-            </Field>
-          </>
-        )}
-
         {draft.kind === "other_asset" && (
           <Field label="估值">
             <input className="input num" type="number" step="0.01" value={draft.value}
@@ -220,8 +175,10 @@ function AccountForm({ draft, setDraft, currencies }) {
           历史记录一次就补齐了 —— 比手敲快得多，而且会用对账单自己的期末余额校验一遍。
         </div>
       )}
-      {draft.kind === "property" && (
-        <div className="tiny faint">建好之后展开它，可以关联对应的房贷，直接看净权益（估值 − 贷款余额）。</div>
+      {isPhysical(draft.kind) && (
+        <div className="tiny faint">
+          房产和汽车只记名字和说明，不记金额，也不计入资产合计 —— 它们会以名字的形式列在总览里。
+        </div>
       )}
     </div>
   );
@@ -246,6 +203,7 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
   const summary = useMemo(() => summarizeAccounts(accounts, { asOf, quotes }), [accounts, quotes, asOf]);
   const alerts = useMemo(() => accountAlerts(accounts, { asOf, quotes }), [accounts, quotes, asOf]);
   const symbols = useMemo(() => heldSymbols(accounts), [accounts]);
+  const physical = useMemo(() => physicalAssets(accounts), [accounts]);
   const provider = providerMeta(quoteCfg.provider);
 
   const visible = accounts.filter((a) => showArchived || !a.archived);
@@ -273,7 +231,33 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
   const setQuote = (symbol, quote) =>
     setData((prev) => ({ ...prev, quotes: { ...(prev.quotes || {}), [symbol]: quote } }));
 
-  async function refreshQuotes() {
+  // Symbols whose cached price is missing or from an earlier day. Prices only
+  // move once a day for our purposes, so this settles down after one fetch.
+  // A hand-typed price counts for the day it was typed and no longer: once a
+  // provider is configured it should take over rather than being blocked by a
+  // number someone entered as a stopgap weeks ago.
+  const staleSymbols = useMemo(
+    () => symbols.filter((sym) => {
+      const q = quotes[sym];
+      if (!q) return true;
+      return String(q.fetchedAt || q.asOf || "").slice(0, 10) !== asOf;
+    }),
+    [symbols, quotes, asOf]
+  );
+
+  // Fetch on arrival rather than making someone press a button to see today's
+  // number. Runs at most once per mount, and only when something is actually out
+  // of date — a page visit should not burn a free-tier call for nothing.
+  const autoFetched = useRef(false);
+  useEffect(() => {
+    if (autoFetched.current) return;
+    if (quoteCfg.provider === "manual" || !staleSymbols.length) return;
+    autoFetched.current = true;
+    refreshQuotes(staleSymbols);
+  }, [quoteCfg.provider, staleSymbols]);
+
+  async function refreshQuotes(only) {
+    const symbols = only && only.length ? only : heldSymbols(accounts);
     if (!symbols.length) return;
     setRefreshing(true);
     setQuoteErrors([]);
@@ -429,6 +413,22 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
         </Card>
       )}
 
+      {physical.length > 0 && (
+        <Card>
+          <div className="card-title" style={{ marginBottom: 8 }}>实物资产</div>
+          <div className="row" style={{ gap: 14 }}>
+            {physical.map((p) => (
+              <span key={p.id} className="row" style={{ gap: 6 }}>
+                <span className="dot" style={{ background: KIND_META[p.kind]?.color }} />
+                <strong>{p.name}</strong>
+                <span className="tiny faint">{KIND_META[p.kind]?.label}{p.description ? ` · ${p.description}` : ""}</span>
+              </span>
+            ))}
+          </div>
+          <div className="tiny faint" style={{ marginTop: 8 }}>只登记名字，不计入上面的资产合计。</div>
+        </Card>
+      )}
+
       {alerts.map((a, i) => <Note key={i} tone={a.tone}>{a.message}</Note>)}
 
       {/* ---- toolbar ---- */}
@@ -464,11 +464,14 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
               <div className="tiny faint">
                 {provider.label} · {symbols.length} 个代码
                 {lastQuoteAt ? ` · 最后更新 ${String(lastQuoteAt).slice(0, 16).replace("T", " ")}` : " · 还没取过价"}
+                {quoteCfg.provider !== "manual" && (staleSymbols.length
+                  ? ` · ${staleSymbols.length} 个待更新`
+                  : lastQuoteAt ? " · 今天已更新" : "")}
               </div>
             </div>
             <div className="row">
               <button className="btn btn-sm" onClick={goToSettings}>换行情源</button>
-              <button className="btn btn-primary btn-sm" onClick={refreshQuotes}
+              <button className="btn btn-primary btn-sm" onClick={() => refreshQuotes()}
                 disabled={refreshing || quoteCfg.provider === "manual"}
                 title={quoteCfg.provider === "manual" ? "当前行情源是手动输入" : ""}>
                 {refreshing ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}

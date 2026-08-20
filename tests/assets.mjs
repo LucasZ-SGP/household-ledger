@@ -6,6 +6,7 @@ import {
   cpfInterest, cpfTotal, cpfAge,
   valueBrokerage, valueAccount, summarizeAccounts, heldSymbols,
   snapshotFromAccounts, accountAlerts, newAccount, sideOf,
+  cashOf, physicalAssets, newHolding, isPhysical,
 } from "../src/lib/assets.js";
 
 const near = (actual, expected, tol, label) =>
@@ -227,10 +228,11 @@ export function runAssetTests(t) {
 
   // ---------- brokerage ----------
   const brokerage = {
-    kind: "brokerage", currency: "USD", cash: 1200,
+    kind: "brokerage", currency: "USD",
+    cashByCurrency: { USD: 1200, SGD: 800 },
     holdings: [
-      { id: "h1", symbol: "QQQ", quantity: 50, currency: "USD", costBasis: 400 },
-      { id: "h2", symbol: "D05.SI", quantity: 300, currency: "SGD", costBasis: 30 },
+      { id: "h1", symbol: "QQQ", quantity: 50, currency: "USD" },
+      { id: "h2", symbol: "D05.SI", quantity: 300, currency: "SGD" },
     ],
   };
   const quotes = {
@@ -241,18 +243,29 @@ export function runAssetTests(t) {
   t("50 QQQ at 500 is a 25,000 position", () => {
     const v = valueBrokerage(brokerage, quotes, "2026-08-20");
     assert.equal(v.rows[0].value, 25000);
-    assert.equal(v.rows[0].gain, 25000 - 20000);
-    near(v.rows[0].gainPct, 25, 0.001);
   });
   t("market value is kept per currency, never silently converted", () => {
     const v = valueBrokerage(brokerage, quotes, "2026-08-20");
-    assert.equal(v.byCurrency.USD, 25000 + 1200);
-    assert.equal(v.byCurrency.SGD, 12000);
+    // USD: 25,000 of QQQ + 1,200 cash. SGD: 12,000 of D05 + 800 cash.
+    assert.equal(v.byCurrency.USD, 26200);
+    assert.equal(v.byCurrency.SGD, 12800);
+    assert.equal(Object.keys(v.byCurrency).sort().join(), "SGD,USD");
+  });
+  t("idle cash is held per currency, side by side", () => {
+    assert.deepEqual(cashOf(brokerage), { USD: 1200, SGD: 800 });
+  });
+  t("a single-number cash balance from an older file still reads", () => {
+    assert.deepEqual(cashOf({ currency: "SGD", cash: 5000 }), { SGD: 5000 });
+    assert.deepEqual(cashOf({ currency: "SGD" }), {});
+  });
+  t("zero balances drop out instead of cluttering the totals", () => {
+    assert.deepEqual(cashOf({ cashByCurrency: { SGD: 5000, USD: 0, EUR: "" } }), { SGD: 5000 });
   });
   t("a holding with no price is reported, not counted as zero", () => {
     const v = valueBrokerage(brokerage, { QQQ: quotes.QQQ }, "2026-08-20");
     assert.deepEqual(v.missing, ["D05.SI"]);
-    assert.equal(v.byCurrency.SGD, undefined);
+    // The SGD cash still counts; only the unpriced holding is left out.
+    assert.equal(v.byCurrency.SGD, 800);
     assert.equal(v.rows[1].value, null);
   });
   t("a stale quote is flagged", () => {
@@ -264,10 +277,10 @@ export function runAssetTests(t) {
     const wrong = { QQQ: { price: 500, currency: "SGD", asOf: "2026-08-19" } };
     const v = valueBrokerage(brokerage, wrong, "2026-08-20");
     assert.equal(v.rows[0].currencyMismatch, true);
-    assert.equal(v.byCurrency.SGD, 25000, "the quote's own currency wins");
+    assert.equal(v.byCurrency.SGD, 25000 + 800, "the quote's own currency wins");
   });
   t("symbols are matched case-insensitively", () => {
-    const lower = { ...brokerage, holdings: [{ id: "h", symbol: "qqq", quantity: 2, currency: "USD" }] };
+    const lower = { ...brokerage, cashByCurrency: {}, holdings: [{ id: "h", symbol: "qqq", quantity: 2, currency: "USD" }] };
     assert.equal(valueBrokerage(lower, quotes, "2026-08-20").rows[0].value, 1000);
   });
   t("heldSymbols collects every ticker once", () => {
@@ -289,10 +302,10 @@ export function runAssetTests(t) {
   t("summary splits assets and liabilities per currency", () => {
     const s = summarizeAccounts(portfolio, { asOf: "2026-08-20", quotes });
     assert.deepEqual(s.currencies, ["SGD", "USD"]);
-    // SGD: 20000 cash + 100000 FD + 12000 D05 + 100000 CPF
-    assert.equal(s.byCurrency.SGD.assets, 232000);
+    // SGD: 20000 cash + 100000 FD + 12000 D05 + 800 brokerage cash + 100000 CPF
+    assert.equal(s.byCurrency.SGD.assets, 232800);
     assert.equal(s.byCurrency.SGD.liabilities, 400000);
-    assert.equal(s.byCurrency.SGD.net, -168000);
+    assert.equal(s.byCurrency.SGD.net, -167200);
     assert.equal(s.byCurrency.USD.assets, 26200);
     assert.equal(s.byCurrency.USD.liabilities, 0);
   });
@@ -303,7 +316,7 @@ export function runAssetTests(t) {
   });
   t("archived accounts drop out of the totals", () => {
     const s = summarizeAccounts(portfolio.map((a) => (a.id === "a" ? { ...a, archived: true } : a)), { asOf: "2026-08-20", quotes });
-    assert.equal(s.byCurrency.SGD.assets, 212000);
+    assert.equal(s.byCurrency.SGD.assets, 212800);
   });
   t("missing quotes bubble up to the summary", () => {
     const s = summarizeAccounts(portfolio, { asOf: "2026-08-20", quotes: {} });
@@ -318,7 +331,7 @@ export function runAssetTests(t) {
     const rows = snapshotFromAccounts(portfolio, { asOf: "2026-08-20", quotes });
     const sgd = rows.filter((r) => r.currency === "SGD");
     assert.equal(sgd.length, 2);
-    assert.equal(sgd.find((r) => r.type === "asset").amount, 232000);
+    assert.equal(sgd.find((r) => r.type === "asset").amount, 232800);
     assert.equal(sgd.find((r) => r.type === "liability").amount, 400000);
     assert.ok(rows.every((r) => r.date === "2026-08-20"));
   });
@@ -342,13 +355,51 @@ export function runAssetTests(t) {
     assert.deepEqual(accountAlerts([{ id: "a", kind: "cash", currency: "SGD", balance: 100 }], { asOf: "2026-08-20" }), []);
   });
 
+  // ---------- physical assets ----------
+  t("a house and a car are recorded by name, with no amount attached", () => {
+    const house = { id: "p", kind: "property", name: "Punggol 四房", currency: "SGD", description: "2024 年入伙" };
+    const car = { id: "v", kind: "vehicle", name: "CR-V", currency: "SGD", description: "COE 2032 到期" };
+    assert.deepEqual(valueAccount(house, {}).byCurrency, {});
+    assert.deepEqual(valueAccount(car, {}).byCurrency, {});
+  });
+  t("physical assets never move the asset total", () => {
+    const withHouse = [...portfolio, { id: "p", kind: "property", name: "组屋", currency: "SGD", description: "" }];
+    const before = summarizeAccounts(portfolio, { asOf: "2026-08-20", quotes });
+    const after = summarizeAccounts(withHouse, { asOf: "2026-08-20", quotes });
+    assert.deepEqual(after.byCurrency.SGD, before.byCurrency.SGD);
+  });
+  t("physicalAssets lists them for the overview", () => {
+    const list = physicalAssets([
+      { id: "p", kind: "property", name: "组屋", description: "Punggol" },
+      { id: "v", kind: "vehicle", name: "CR-V", description: "" },
+      { id: "x", kind: "vehicle", name: "旧车", archived: true },
+      { id: "c", kind: "cash", name: "现金" },
+    ]);
+    assert.deepEqual(list.map((p) => p.name), ["组屋", "CR-V"]);
+    assert.equal(list[0].description, "Punggol");
+  });
+  t("a physical asset carries no price fields to go stale", () => {
+    const car = newAccount("vehicle", "SGD");
+    assert.equal(car.value, undefined);
+    assert.equal(car.purchasePrice, undefined);
+    assert.equal(car.description, "");
+  });
+  t("holdings no longer carry a cost basis", () => {
+    assert.equal(newHolding("USD").costBasis, undefined);
+  });
+
   // ---------- factories / plumbing ----------
   t("new accounts come with sane defaults", () => {
     const fd = newAccount("fixed_deposit", "SGD");
     assert.equal(fd.termMonths, 12);
     assert.equal(fd.maturityDate, addMonthsISO(fd.startDate, 12));
     assert.equal(newAccount("mortgage").accrualDay, 1);
+    assert.equal(newAccount("mortgage").annualRate, 2.6, "HDB concessionary rate");
     assert.equal(newAccount("cpf").currency, "SGD");
+  });
+  t("physical kinds are recognised as physical", () => {
+    assert.ok(isPhysical("property") && isPhysical("vehicle"));
+    assert.ok(!isPhysical("brokerage") && !isPhysical("other_asset"));
   });
   t("liability kinds are on the liability side", () => {
     assert.equal(sideOf("mortgage"), "liability");

@@ -41,6 +41,9 @@ function fromB64(s) {
 }
 
 const fetchLog = [];
+const quoteCalls = [];
+// A stand-in Finnhub. `c` is the current price, `pc` the previous close.
+const market = { QQQ: 512.34 };
 globalThis.fetch = async (url, opts = {}) => {
   url = String(url);
   const method = opts.method || "GET";
@@ -50,6 +53,14 @@ globalThis.fetch = async (url, opts = {}) => {
     status,
     text: async () => (body === undefined ? "" : JSON.stringify(body)),
   });
+
+  if (url.includes("finnhub.io")) {
+    quoteCalls.push(url);
+    const sym = decodeURIComponent(new URL(url).searchParams.get("symbol") || "");
+    const price = market[sym];
+    if (price === undefined) return mk(200, { c: 0, pc: 0 });
+    return mk(200, { c: price, pc: price - 1, t: Math.floor(Date.now() / 1000) });
+  }
 
   if (!repo.exists) return mk(404, { message: "Not Found" });
 
@@ -146,6 +157,21 @@ function fieldInput(scope, label) {
 }
 function cardWith(frag) {
   return Array.from(container.querySelectorAll(".card")).find((c) => c.textContent.includes(frag));
+}
+// The per-currency summary card at the top of the assets page.
+function summaryCard(ccy) {
+  return Array.from(container.querySelectorAll(".card"))
+    .find((c) => c.querySelector(".card-title")?.textContent.trim() === ccy);
+}
+function assetsOf(ccy) {
+  const card = summaryCard(ccy);
+  const m = card && card.textContent.match(/资产(S?\$[\d,]+\.\d\d)/);
+  return m ? m[1] : null;
+}
+async function clickIn(scope, label) {
+  const btn = Array.from(scope.querySelectorAll("button")).find((b) => b.textContent.trim() === label);
+  if (!btn) throw new Error(`button "${label}" not found in scope`);
+  await act(async () => { btn.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(60); });
 }
 function inputByPlaceholder(frag) {
   return Array.from(container.querySelectorAll("input")).find((i) => (i.placeholder || "").includes(frag));
@@ -481,6 +507,57 @@ await step("a brokerage holding values at quantity x price once a price is known
   assert.ok(text().includes("$25,000.00"), `50 x 500 should be 25,000; body had ${text().match(/\$[\d,]+\.\d\d/g)}`);
 });
 
+await step("brokerage cash is recorded per currency, never converted", async () => {
+  const card = cardWith("IBKR");
+  await clickIn(card, "SGD");
+  await clickIn(cardWith("IBKR"), "USD");
+  const rows = Array.from(cardWith("IBKR").querySelectorAll(".row"))
+    .filter((r) => /^(SGD|USD)/.test(r.textContent.trim()));
+  assert.ok(rows.length >= 2, "expected a row per currency");
+  const sgdInput = rows.find((r) => r.textContent.trim().startsWith("SGD")).querySelector("input");
+  const usdInput = rows.find((r) => r.textContent.trim().startsWith("USD")).querySelector("input");
+  await type(sgdInput, "5000");
+  await type(usdInput, "1000");
+  const card2 = cardWith("IBKR");
+  // The holding was added in SGD, so SGD carries 25,000 of QQQ plus 5,000 cash,
+  // while the 1,000 of USD cash stays in its own column — no conversion anywhere.
+  assert.ok(card2.textContent.includes("S$30,000.00"), `SGD subtotal wrong: ${card2.textContent.match(/S?\$[\d,]+\.\d\d/g)}`);
+  assert.ok(card2.textContent.includes("$1,000.00"), "USD cash should stand on its own");
+  assert.equal(assetsOf("USD"), "$1,000.00", "USD assets must not absorb any SGD");
+});
+
+await step("holdings carry no cost basis any more", () => {
+  const head = cardWith("IBKR").querySelector("thead").textContent;
+  assert.ok(!head.includes("成本"), "cost column should be gone");
+  assert.ok(!head.includes("盈亏"), "gain column should be gone");
+  assert.ok(head.includes("现价") && head.includes("市值"));
+});
+
+let assetsBeforePhysical = null;
+await step("a house and a car are listed by name, with no amount", async () => {
+  assetsBeforePhysical = assetsOf("SGD");
+  await click("房产");
+  await type(inputByPlaceholder("房产"), "Punggol 组屋");
+  await click("添加账户");
+  await click("汽车");
+  await type(inputByPlaceholder("汽车"), "CR-V");
+  await click("添加账户");
+
+  const overview = cardWith("实物资产");
+  assert.ok(overview, "expected the physical-asset card in the overview");
+  assert.ok(overview.textContent.includes("Punggol 组屋") && overview.textContent.includes("CR-V"));
+  assert.ok(overview.textContent.includes("不计入"), "it should say it stays out of the totals");
+
+  const card = cardWith("Punggol 组屋");
+  assert.ok(!card.textContent.includes("购入价"), "no price field should exist");
+  assert.ok(!/S\$0\.00/.test(card.textContent), "a house must not show a zero valuation");
+});
+
+await step("adding them does not move the asset total", () => {
+  assert.ok(assetsBeforePhysical, "failed to read the SGD assets figure");
+  assert.equal(assetsOf("SGD"), assetsBeforePhysical, "a named house must not change the total");
+});
+
 await step("a snapshot can be generated from the live account values", async () => {
   await click("生成净资产快照");
   assert.match(text(), /已把今天的资产负债写入净资产快照/);
@@ -514,7 +591,13 @@ await step("saved payload is valid UTF-8 JSON with Chinese intact", () => {
   assert.ok(names.includes("人情往来（红包/礼金）"), "seed Chinese category corrupted");
   assert.ok(names.includes("自定义杂项"), "user-created category missing");
   assert.ok(parsed.rules.some((r) => r.pattern === "WEIRD ABBREV POS 4471"), "learned rule not persisted");
-  assert.equal(parsed.accounts.length, 3, "accounts not persisted");
+  assert.equal(parsed.accounts.length, 5, "accounts not persisted");
+  const house = parsed.accounts.find((a) => a.kind === "property");
+  assert.equal(house.value, undefined, "a property must not carry a valuation");
+  const ibkr = parsed.accounts.find((a) => a.kind === "brokerage");
+  assert.equal(Number(ibkr.cashByCurrency.SGD), 5000);
+  assert.equal(Number(ibkr.cashByCurrency.USD), 1000);
+  assert.ok(ibkr.holdings.every((h) => h.costBasis === undefined), "cost basis should be gone");
   const loan = parsed.accounts.find((a) => a.kind === "mortgage");
   const fromStatement = loan.entries.filter((e) => e.source === "statement");
   assert.equal(fromStatement.length, 135, "the imported statement should be in the file");
@@ -580,6 +663,48 @@ await step("remote data reloads correctly into a fresh app instance", async () =
   const btn = Array.from(c2.querySelectorAll("button")).find((b) => b.textContent.trim().startsWith("交易记录"));
   await act(async () => { btn.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(80); });
   assert.ok(document.body.textContent.includes("冲突测试"), "transactions did not reload from remote");
+});
+
+// ---------- prices fetch themselves ----------
+await step("with a provider configured, prices are fetched on arrival", async () => {
+  lsData.delete("ledger.cache");
+  lsData.set("ledger.quotes.config", JSON.stringify({ provider: "finnhub", apiKey: "test-key", proxy: "" }));
+  quoteCalls.length = 0;
+
+  // Age the cached price by a day: this is the ordinary case of opening the app
+  // the next morning, which is exactly when a fetch should happen by itself.
+  const stored = JSON.parse(fromB64(repo.file.content));
+  const yesterday = new Date(Date.now() - 86400000).toISOString();
+  stored.quotes.QQQ = { ...stored.quotes.QQQ, fetchedAt: yesterday, asOf: yesterday };
+  repo.file = { content: b64(JSON.stringify(stored, null, 2)), sha: repo.file.sha };
+
+  await act(async () => { root.unmount?.(); await flush(20); });
+  const c3 = document.createElement("div");
+  document.body.innerHTML = "";
+  document.body.appendChild(c3);
+  const root3 = createRoot(c3);
+  await act(async () => { root3.render(React.createElement(App)); await flush(250); });
+
+  const goAssets = Array.from(c3.querySelectorAll("button")).find((b) => b.textContent.trim().startsWith("资产负债"));
+  await act(async () => { goAssets.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(300); });
+
+  assert.ok(quoteCalls.length > 0, "the page should fetch without anyone pressing refresh");
+  assert.ok(quoteCalls[0].includes("symbol=QQQ"), `expected a QQQ quote call, got ${quoteCalls[0]}`);
+  assert.ok(quoteCalls[0].includes("token=test-key"), "the api key should be sent");
+
+  // 50 shares at the fetched 512.34 = 25,617, plus the 5,000 of SGD cash.
+  const body = document.body.textContent;
+  assert.ok(body.includes("30,617.00"), `the fetched price should flow into the totals; body had ${body.match(/[\d,]+\.\d\d/g)?.slice(0, 8)}`);
+  assert.ok(!body.includes("30,000.00"), "the stale manual price should have been replaced");
+});
+
+await step("a second visit does not spend another API call on the same day", async () => {
+  const before = quoteCalls.length;
+  const goDash = Array.from(document.querySelectorAll("button")).find((b) => b.textContent.trim().startsWith("总览"));
+  await act(async () => { goDash.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(80); });
+  const goAssets = Array.from(document.querySelectorAll("button")).find((b) => b.textContent.trim().startsWith("资产负债"));
+  await act(async () => { goAssets.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); await flush(200); });
+  assert.equal(quoteCalls.length, before, "today's price is already cached; free-tier calls are finite");
 });
 
 console.log(results.join("\n"));
