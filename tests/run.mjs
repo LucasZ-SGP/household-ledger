@@ -4,6 +4,7 @@ import { runOcbcTests } from "./ocbc.mjs";
 import { runAssetTests } from "./assets.mjs";
 import { runQuoteTests } from "./quotes.mjs";
 import { runLoanStatementTests } from "./loanstatement.mjs";
+import { runFlowTests } from "./flows.mjs";
 
 const pending = [];
 const t = (name, fn) => pending.push({ name, fn });
@@ -14,6 +15,7 @@ runOcbcTests(t);
 runAssetTests(t);
 runQuoteTests(t);
 runLoanStatementTests(t);
+runFlowTests(t);
 
 let pass = 0, fail = 0;
 const lines = [];

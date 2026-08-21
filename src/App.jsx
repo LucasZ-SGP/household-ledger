@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   PieChart as PieIcon, Upload as UploadIcon, AlertCircle, List, Landmark,
-  Coins, Settings as SettingsIcon, Menu, Cloud, CloudOff, Loader2, Wallet,
+  Coins, Settings as SettingsIcon, Menu, Cloud, CloudOff, Loader2, Wallet, CalendarDays,
   CheckCircle2, Save, RefreshCw,
 } from "lucide-react";
 import { Note, ConfirmBar } from "./components/ui.jsx";
@@ -11,6 +11,7 @@ import Review from "./views/Review.jsx";
 import Transactions from "./views/Transactions.jsx";
 import NetWorth from "./views/NetWorth.jsx";
 import Assets from "./views/Assets.jsx";
+import Monthly from "./views/Monthly.jsx";
 import Categories from "./views/Categories.jsx";
 import Settings from "./views/Settings.jsx";
 import { freshState, normalizeState } from "./lib/model.js";
@@ -28,6 +29,7 @@ const NAV = [
   { id: "upload", label: "导入账单", icon: UploadIcon },
   { id: "review", label: "待确认", icon: AlertCircle },
   { id: "transactions", label: "交易记录", icon: List },
+  { id: "monthly", label: "月度结算", icon: CalendarDays },
   { id: "assets", label: "资产负债", icon: Wallet },
   { id: "networth", label: "净资产", icon: Landmark },
   { id: "categories", label: "分类与规则", icon: Coins },
@@ -290,6 +292,9 @@ export default function App() {
           {tab === "upload" && <UploadView data={data} setData={setData} goToReview={() => setTab("review")} />}
           {tab === "review" && <Review data={data} setData={setData} />}
           {tab === "transactions" && <Transactions data={data} setData={setData} />}
+          {tab === "monthly" && (
+            <Monthly data={data} setData={setData} goToAssets={() => setTab("assets")} />
+          )}
           {tab === "assets" && (
             <Assets data={data} setData={setData} quoteCfg={quoteCfg} goToSettings={() => setTab("settings")} />
           )}

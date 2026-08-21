@@ -197,7 +197,7 @@ await step("starts unconfigured with a warning to connect GitHub", () => {
 });
 
 await step("all nav tabs render without crashing", async () => {
-  for (const label of ["总览", "导入账单", "待确认", "交易记录", "资产负债", "净资产", "分类与规则", "设置"]) {
+  for (const label of ["总览", "导入账单", "待确认", "交易记录", "月度结算", "资产负债", "净资产", "分类与规则", "设置"]) {
     await click(label);
     assert.ok(text().length > 100, `tab ${label} rendered empty`);
   }
@@ -570,6 +570,73 @@ await step("accounts and prices survive a round-trip through the ledger file", a
   assert.ok(text().includes("OCBC 12个月定期") && text().includes("HDB 房贷") && text().includes("IBKR"));
 });
 
+// ---------- the monthly clearing sheet ----------
+await step("the month picks up salary and dividends from the imported statement", async () => {
+  await click("月度结算");
+  // The CSV imported earlier is dated January 2026.
+  const picker = Array.from(container.querySelectorAll("select"))
+    .find((sel) => Array.from(sel.options).some((o) => o.textContent.includes("2026 年 1 月")));
+  assert.ok(picker, "expected January to be offered");
+  await select(picker, "2026-01");
+  const body = text();
+  assert.ok(body.includes("S$8,000.00"), `expected the salary; body had ${body.match(/S\$[\d,]+\.\d\d/g)?.slice(0, 6)}`);
+  assert.ok(body.includes("工资性收入"));
+});
+
+await step("surplus is income minus what was spent that month", () => {
+  // 8,000 in; 4,120.78 of expenses were imported for January.
+  assert.ok(text().includes("S$4,120.78"), "expected the month's spending");
+  assert.ok(text().includes("S$3,879.22"), "expected income minus spending");
+});
+
+await step("an unplaced surplus is called out rather than left as a nice number", () => {
+  assert.match(text(), /待分配/);
+  assert.ok(!text().includes("已结清"), "an unplaced month must not read as closed");
+});
+
+await step("money that never touches the bank can be added by hand", async () => {
+  await click("手动补一笔");
+  const card = cardWith("收入构成");
+  const catSel = card.querySelector("select");
+  const opt = Array.from(catSel.options).find((o) => o.textContent.includes("资本利得"));
+  await select(catSel, opt.value);
+  await type(fieldInput(cardWith("收入构成"), "金额"), "1200");
+  await clickIn(cardWith("收入构成"), "添加");
+  const body = cardWith("收入构成").textContent;
+  assert.ok(body.includes("S$1,200.00"), "the manual entry should show up");
+  assert.ok(body.includes("手动补录"), "and be marked as hand-entered");
+});
+
+await step("allocating the surplus to a deposit and a loan closes the month", async () => {
+  // 3,879.22 surplus + 1,200 manual capital gains = 5,079.22 to place.
+  await click("添加分配");
+  const card = cardWith("结余去向");
+  const target = card.querySelector("select");
+  const fdOpt = Array.from(target.options).find((o) => o.textContent.includes("OCBC 12个月定期"));
+  assert.ok(fdOpt, `expected the deposit as a target; had ${Array.from(target.options).map((o) => o.textContent)}`);
+  await select(target, fdOpt.value);
+  await type(fieldInput(cardWith("结余去向"), "金额"), "4000");
+  await clickIn(cardWith("结余去向"), "记入");
+  assert.ok(cardWith("结余去向").textContent.includes("转化为资产"));
+
+  await click("添加分配");
+  const card2 = cardWith("结余去向");
+  const target2 = card2.querySelector("select");
+  const loanOpt = Array.from(target2.options).find((o) => o.textContent.includes("HDB 房贷"));
+  await select(target2, loanOpt.value);
+  await type(fieldInput(cardWith("结余去向"), "金额"), "1079.22");
+  await clickIn(cardWith("结余去向"), "记入");
+
+  assert.match(text(), /已结清/, `the month should now clear to zero; body: ${text().match(/待分配|超额分配|已结清/g)}`);
+});
+
+await step("a house is not offered as somewhere to put money", async () => {
+  await click("添加分配");
+  const opts = Array.from(cardWith("结余去向").querySelector("select").options).map((o) => o.textContent);
+  assert.ok(!opts.some((o) => o.includes("Punggol 组屋")), "a property carries no amount, so it cannot absorb a surplus");
+  assert.ok(opts.some((o) => o.includes("HDB 房贷")), "but a debt can");
+});
+
 // ---------- saving ----------
 await step("dirty state is flagged before saving", () => {
   assert.ok(text().includes("有未保存的修改"), "expected dirty indicator");
@@ -603,7 +670,11 @@ await step("saved payload is valid UTF-8 JSON with Chinese intact", () => {
   assert.equal(fromStatement.length, 135, "the imported statement should be in the file");
   assert.ok(loan.entries.some((e) => e.type === "rebate" && e.source !== "statement"), "the hand-entered rebate should survive too");
   assert.equal(parsed.quotes.QQQ.price, 500, "the last known price should travel with the ledger");
-  assert.equal(parsed.schemaVersion, 2);
+  assert.equal(parsed.schemaVersion, 3);
+  assert.equal(parsed.incomeEntries.length, 1, "the hand-entered income should persist");
+  assert.equal(parsed.allocations.length, 2, "both allocations should persist");
+  assert.equal(parsed.allocations[0].month, "2026-01");
+  assert.ok(parsed.allocations.some((a) => Number(a.amount) === 4000), "the deposit allocation should be there");
 });
 
 await step("second save sends the updated sha and succeeds", async () => {
