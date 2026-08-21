@@ -1,5 +1,6 @@
 import React from "react";
 import { AlertTriangle, Info, AlertCircle } from "lucide-react";
+import { useLang } from "../lib/i18n.js";
 
 export function Card({ children, className = "", ...rest }) {
   return <div className={`card ${className}`} {...rest}>{children}</div>;
@@ -35,7 +36,8 @@ export function Note({ tone = "info", children }) {
   );
 }
 
-export function ConfirmBar({ text, confirmLabel = "确认", tone = "danger", onConfirm, onCancel }) {
+export function ConfirmBar({ text, confirmLabel, tone = "danger", onConfirm, onCancel }) {
+  const { t } = useLang();
   return (
     <div className="note note-warn" style={{ justifyContent: "space-between", alignItems: "center" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -43,9 +45,9 @@ export function ConfirmBar({ text, confirmLabel = "确认", tone = "danger", onC
         <div>{text}</div>
       </div>
       <div className="row" style={{ flexWrap: "nowrap" }}>
-        <button className="btn btn-sm" onClick={onCancel}>取消</button>
+        <button className="btn btn-sm" onClick={onCancel}>{t("取消")}</button>
         <button className={`btn btn-sm ${tone === "danger" ? "btn-danger" : "btn-primary"}`} onClick={onConfirm}>
-          {confirmLabel}
+          {confirmLabel || t("确认")}
         </button>
       </div>
     </div>

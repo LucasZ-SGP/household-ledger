@@ -3,12 +3,14 @@
 // Everything here is framework-free so it can be unit-tested directly in node.
 // ---------------------------------------------------------------------------
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const CURRENCY_META = {
   SGD: { label: "新加坡元", symbol: "S$", accent: "#2F6F5E" },
   CNY: { label: "人民币", symbol: "¥", accent: "#A63D40" },
   USD: { label: "美元", symbol: "$", accent: "#35618F" },
+  JPY: { label: "日元", symbol: "JP¥", accent: "#B08A2E" },
+  EUR: { label: "欧元", symbol: "€", accent: "#6E5A9E" },
 };
 
 const FALLBACK_ACCENTS = ["#6E5A9E", "#B08A2E", "#3D7A99", "#8C4E6B"];
@@ -112,6 +114,7 @@ export function freshState() {
     netWorthEntries: [],
     accounts: [],
     quotes: {},
+    fxRates: {},
     incomeEntries: [],
     allocations: [],
     lastAccount: "",
@@ -138,6 +141,9 @@ export function normalizeState(parsed) {
     // v2 added standing positions (accounts) and their last-known prices.
     accounts: Array.isArray(parsed.accounts) ? parsed.accounts.map(normalizeAccount) : [],
     quotes: parsed.quotes && typeof parsed.quotes === "object" ? parsed.quotes : {},
+    // v4 added a cache of fetched currency-conversion rates, so the net-worth
+    // page can show one converted total without re-fetching every visit.
+    fxRates: parsed.fxRates && typeof parsed.fxRates === "object" ? parsed.fxRates : {},
     // v3 added the monthly clearing sheet: income the statement misses, and
     // where each month's surplus was placed.
     incomeEntries: Array.isArray(parsed.incomeEntries) ? parsed.incomeEntries : [],

@@ -4,6 +4,7 @@ import { Upload as UploadIcon, CheckCircle2, Loader2, ShieldCheck, ShieldAlert }
 import { Card, Field, Note } from "../components/ui.jsx";
 import { rowsToDrafts, categorize, txnSignature } from "../lib/parse.js";
 import { formatMoney, uid } from "../lib/model.js";
+import { useLang } from "../lib/i18n.js";
 
 // A row with more fields than headers almost always means an unquoted comma
 // inside a value — typically a thousands separator like -2,500.00. Left alone
@@ -25,20 +26,24 @@ function inspectCsv(parsed) {
 // Shows the arithmetic verification of a PDF parse. This is the main defence
 // against silently importing a misread amount: the statement's own running
 // balances and printed totals must agree with what we extracted.
-function ReconciliationPanel({ recon, currency }) {
+function ReconciliationPanel({ recon, currency, t }) {
   if (!recon || !recon.checked) {
-    return <Note tone="warn">这份账单没有可用的期初余额，无法做对账校验，请自行抽查金额。</Note>;
+    return <Note tone="warn">{t("这份账单没有可用的期初余额，无法做对账校验，请自行抽查金额。")}</Note>;
   }
   if (recon.ok) {
     return (
       <div className="note note-info" style={{ borderColor: "#BFD9C7", background: "#F2F8F3" }}>
         <ShieldCheck size={15} color="#2F8558" />
         <div>
-          <b style={{ color: "#2F8558" }}>对账校验通过</b>
+          <b style={{ color: "#2F8558" }}>{t("对账校验通过")}</b>
           <div className="tiny" style={{ marginTop: 3, lineHeight: 1.6 }}>
-            逐笔余额连续无误 · 期初 {formatMoney(recon.opening, currency)} ＋ 存入 {formatMoney(recon.sumDeposits, currency)}
-            {" "}－ 支出 {formatMoney(recon.sumWithdrawals, currency)} ＝ 期末 {formatMoney(recon.closing, currency)}
-            {recon.totalsOk ? " · 与账单打印的合计金额一致" : ""}
+            {t("逐笔余额连续无误 · 期初 {opening} ＋ 存入 {deposits} － 支出 {withdrawals} ＝ 期末 {closing}", {
+              opening: formatMoney(recon.opening, currency),
+              deposits: formatMoney(recon.sumDeposits, currency),
+              withdrawals: formatMoney(recon.sumWithdrawals, currency),
+              closing: formatMoney(recon.closing, currency),
+            })}
+            {recon.totalsOk ? t(" · 与账单打印的合计金额一致") : ""}
           </div>
         </div>
       </div>
@@ -46,25 +51,30 @@ function ReconciliationPanel({ recon, currency }) {
   }
   return (
     <Note tone="error">
-      <b>对账校验未通过</b>
+      <b>{t("对账校验未通过")}</b>
       <div className="tiny" style={{ marginTop: 4, lineHeight: 1.6 }}>
         {recon.rowMismatches.length > 0 && (
-          <div>有 {recon.rowMismatches.length} 行的余额对不上，例如：
+          <div>{t("有 {count} 行的余额对不上，例如：", { count: recon.rowMismatches.length })}
             {recon.rowMismatches.slice(0, 3).map((m, i) => (
               <div key={i} style={{ marginLeft: 8 }}>
-                {m.date} {m.description}：算出 {formatMoney(m.expected, currency)}，账单印的是 {formatMoney(m.printed, currency)}
+                {m.date} {m.description}
+                {t("：算出 {expected}，账单印的是 {printed}", {
+                  expected: formatMoney(m.expected, currency),
+                  printed: formatMoney(m.printed, currency),
+                })}
               </div>
             ))}
           </div>
         )}
-        {recon.closingOk === false && <div>期末余额对不上（算出与账单打印值不一致）。</div>}
-        {recon.totalsOk === false && <div>支出/存入合计与账单打印的 Total 不一致。</div>}
+        {recon.closingOk === false && <div>{t("期末余额对不上（算出与账单打印值不一致）。")}</div>}
+        {recon.totalsOk === false && <div>{t("支出/存入合计与账单打印的 Total 不一致。")}</div>}
       </div>
     </Note>
   );
 }
 
 export default function UploadView({ data, setData, goToReview }) {
+  const { t } = useLang();
   const [step, setStep] = useState("select"); // select | map | preview | done
   const [headers, setHeaders] = useState([]);
   const [rows, setRows] = useState([]);
@@ -91,7 +101,7 @@ export default function UploadView({ data, setData, goToReview }) {
 
   function ingest(hdrs, rws, structuralIssues = null) {
     if (!hdrs.length || !rws.length) {
-      setError("没有解析到任何数据，请确认文件第一行是表头，且下面有数据行。");
+      setError(t("没有解析到任何数据，请确认文件第一行是表头，且下面有数据行。"));
       return;
     }
     setIssues(structuralIssues);
@@ -142,13 +152,13 @@ export default function UploadView({ data, setData, goToReview }) {
         const pages = await extractPages(await file.arrayBuffer());
         const parser = detectParser(pages);
         if (!parser) {
-          setError("这份 PDF 的版式还不认识。目前支持 OCBC 的 Statement of Account；其他银行需要我先看过样本再加适配。");
+          setError(t("这份 PDF 的版式还不认识。目前支持 OCBC 的 Statement of Account；其他银行需要我先看过样本再加适配。"));
           setStep("select");
           return;
         }
         const result = parser.parse(pages, { currency: mapping.currency });
         if (!result.transactions.length) {
-          setError("识别到了账单版式，但没有解析出任何交易。请把这份 PDF 反馈一下，可能是版式有变化。");
+          setError(t("识别到了账单版式，但没有解析出任何交易。请把这份 PDF 反馈一下，可能是版式有变化。"));
           setStep("select");
           return;
         }
@@ -161,10 +171,11 @@ export default function UploadView({ data, setData, goToReview }) {
         }));
         setStep("pdf-preview");
       } else {
-        setError("暂不支持这个格式。请上传 PDF、CSV 或 Excel（.xlsx/.xls）。");
+        setError(t("暂不支持这个格式。请上传 PDF、CSV 或 Excel（.xlsx/.xls）。"));
       }
     } catch (e) {
-      setError(`解析文件时出错：${e && e.message ? e.message : "请确认文件未损坏后重试。"}`);
+      const detail = e && e.message ? e.message : t("请确认文件未损坏后重试。");
+      setError(t("解析文件时出错：{detail}", { detail }));
       setStep("select");
     }
   }
@@ -200,8 +211,8 @@ export default function UploadView({ data, setData, goToReview }) {
         currency: mapping.currency,
         direction: d.direction,
         categoryId,
-        account: mapping.account || "未命名账户",
-        note: d.card ? `卡号 ${d.card}` : "",
+        account: mapping.account || t("未命名账户"),
+        note: d.card ? t("卡号 {card}", { card: d.card }) : "",
         needsReview: !categoryId,
         source,
       });
@@ -217,14 +228,14 @@ export default function UploadView({ data, setData, goToReview }) {
     setStep("done");
   }
 
-  const colOptions = headers.map((h, i) => <option key={i} value={i}>{h || `列 ${i + 1}`}</option>);
+  const colOptions = headers.map((h, i) => <option key={i} value={i}>{h || t("列 {n}", { n: i + 1 })}</option>);
 
   return (
     <div className="stack narrow">
       <Note>
-        支持 <b>PDF</b> 对账单（目前适配 OCBC），以及 <b>CSV</b> / <b>Excel</b>。
-        PDF 在本机解析，不上传任何服务器；解析后会用账单自带的余额和合计做一次对账校验。
-        重复的交易会自动跳过，同一份账单导入两次不会产生重复记录。
+        {t("支持 ")}<b>PDF</b>{t(" 对账单（目前适配 OCBC），以及 ")}<b>CSV</b>{t(" / ")}<b>Excel</b>{t("。")}
+        {t("PDF 在本机解析，不上传任何服务器；解析后会用账单自带的余额和合计做一次对账校验。")}
+        {t("重复的交易会自动跳过，同一份账单导入两次不会产生重复记录。")}
       </Note>
 
       {error && <Note tone="error">{error}</Note>}
@@ -233,8 +244,8 @@ export default function UploadView({ data, setData, goToReview }) {
         <Card>
           <label className="dropzone">
             <UploadIcon size={24} color="#5B6B60" />
-            <div style={{ fontWeight: 500 }}>点击选择文件</div>
-            <div className="tiny faint">支持 .pdf / .csv / .xlsx / .xls</div>
+            <div style={{ fontWeight: 500 }}>{t("点击选择文件")}</div>
+            <div className="tiny faint">{t("支持 .pdf / .csv / .xlsx / .xls")}</div>
             <input
               type="file"
               accept=".pdf,.csv,.xlsx,.xls,.txt"
@@ -243,7 +254,7 @@ export default function UploadView({ data, setData, goToReview }) {
             />
           </label>
           <div style={{ marginTop: 14 }}>
-            <div className="tiny faint" style={{ marginBottom: 5 }}>或者直接粘贴表格内容（第一行为表头）：</div>
+            <div className="tiny faint" style={{ marginBottom: 5 }}>{t("或者直接粘贴表格内容（第一行为表头）：")}</div>
             <textarea
               className="input"
               rows={5}
@@ -252,7 +263,7 @@ export default function UploadView({ data, setData, goToReview }) {
               placeholder={"Date,Description,Amount\n2026-07-01,Salary,8000\n2026-07-03,NTUC Fairprice,-52.30"}
             />
             <button className="btn btn-primary" style={{ marginTop: 8 }} disabled={!pasteText.trim()} onClick={handlePaste}>
-              解析粘贴内容
+              {t("解析粘贴内容")}
             </button>
           </div>
         </Card>
@@ -260,41 +271,41 @@ export default function UploadView({ data, setData, goToReview }) {
 
       {step === "map" && (
         <Card className="stack">
-          <div className="card-title">对应列与币种</div>
+          <div className="card-title">{t("对应列与币种")}</div>
           <div className="grid-form">
-            <Field label="日期列">
+            <Field label={t("日期列")}>
               <select className="select" value={mapping.dateCol} onChange={(e) => setMapping({ ...mapping, dateCol: +e.target.value })}>{colOptions}</select>
             </Field>
-            <Field label="摘要 / 描述列">
+            <Field label={t("摘要 / 描述列")}>
               <select className="select" value={mapping.descCol} onChange={(e) => setMapping({ ...mapping, descCol: +e.target.value })}>{colOptions}</select>
             </Field>
-            <Field label="金额格式">
+            <Field label={t("金额格式")}>
               <select className="select" value={mapping.amountMode} onChange={(e) => setMapping({ ...mapping, amountMode: e.target.value })}>
-                <option value="single">单一金额列（正负号区分收支）</option>
-                <option value="split">借方 / 贷方分列</option>
+                <option value="single">{t("单一金额列（正负号区分收支）")}</option>
+                <option value="split">{t("借方 / 贷方分列")}</option>
               </select>
             </Field>
             {mapping.amountMode === "single" ? (
-              <Field label="金额列">
+              <Field label={t("金额列")}>
                 <select className="select" value={mapping.amountCol} onChange={(e) => setMapping({ ...mapping, amountCol: +e.target.value })}>{colOptions}</select>
               </Field>
             ) : (
               <>
-                <Field label="支出（借方）列">
+                <Field label={t("支出（借方）列")}>
                   <select className="select" value={mapping.debitCol} onChange={(e) => setMapping({ ...mapping, debitCol: +e.target.value })}>{colOptions}</select>
                 </Field>
-                <Field label="收入（贷方）列">
+                <Field label={t("收入（贷方）列")}>
                   <select className="select" value={mapping.creditCol} onChange={(e) => setMapping({ ...mapping, creditCol: +e.target.value })}>{colOptions}</select>
                 </Field>
               </>
             )}
-            <Field label="币种">
+            <Field label={t("币种")}>
               <select className="select" value={mapping.currency} onChange={(e) => setMapping({ ...mapping, currency: e.target.value })}>
                 {data.currencies.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </Field>
-            <Field label="账户名称">
-              <input className="input" value={mapping.account} placeholder="例如：DBS 活期 / 招行储蓄卡"
+            <Field label={t("账户名称")}>
+              <input className="input" value={mapping.account} placeholder={t("例如：DBS 活期 / 招行储蓄卡")}
                 onChange={(e) => setMapping({ ...mapping, account: e.target.value })} />
             </Field>
           </div>
@@ -302,67 +313,69 @@ export default function UploadView({ data, setData, goToReview }) {
           <label className="check">
             <input type="checkbox" checked={mapping.dayFirst}
               onChange={(e) => setMapping({ ...mapping, dayFirst: e.target.checked })} />
-            日期是「日/月/年」格式（美国账单请取消勾选）
+            {t("日期是「日/月/年」格式（美国账单请取消勾选）")}
           </label>
           {mapping.amountMode === "single" && (
             <label className="check">
               <input type="checkbox" checked={mapping.reverseSign}
                 onChange={(e) => setMapping({ ...mapping, reverseSign: e.target.checked })} />
-              这份账单支出为正数、收入为负数（符号相反）
+              {t("这份账单支出为正数、收入为负数（符号相反）")}
             </label>
           )}
 
           <div className="row">
-            <button className="btn" onClick={resetAll}>重新选择</button>
-            <button className="btn btn-primary" onClick={() => setStep("preview")}>下一步：预览</button>
+            <button className="btn" onClick={resetAll}>{t("重新选择")}</button>
+            <button className="btn btn-primary" onClick={() => setStep("preview")}>{t("下一步：预览")}</button>
           </div>
         </Card>
       )}
 
       {step === "preview" && (
         <Card className="stack">
-          <div className="card-title">预览 — 识别出 {drafts.length} 笔有效交易（原始 {rows.length} 行）</div>
+          <div className="card-title">{t("预览 — 识别出 {n} 笔有效交易（原始 {total} 行）", { n: drafts.length, total: rows.length })}</div>
           {drafts.length === 0 && (
-            <Note tone="warn">一笔都没识别出来，通常是列对应错了或日期格式没被认出。返回上一步检查日期列和金额列。</Note>
+            <Note tone="warn">{t("一笔都没识别出来，通常是列对应错了或日期格式没被认出。返回上一步检查日期列和金额列。")}</Note>
           )}
 
           {issues && (
             <Note tone="error">
-              <b>这份文件有 {issues.count} 行的列数对不上</b>（第 {issues.rowNumbers.slice(0, 8).join("、")}
-              {issues.rowNumbers.length > 8 ? " 等" : ""} 行）。
-              最常见的原因是金额里的千分位逗号没有加引号，例如 <span className="mono-inline">-2,500.00</span> 会被当成两列，
-              金额就变成 <span className="mono-inline">-2</span>。
+              <b>{t("这份文件有 {count} 行的列数对不上", { count: issues.count })}</b>
+              {t("（第 {rows} 行）。", {
+                rows: issues.rowNumbers.slice(0, 8).join("、") + (issues.rowNumbers.length > 8 ? t(" 等") : ""),
+              })}
+              {t("最常见的原因是金额里的千分位逗号没有加引号，例如")} <span className="mono-inline">-2,500.00</span> {t("会被当成两列，")}
+              {t("金额就变成")} <span className="mono-inline">-2</span>{t("。")}
               <div style={{ marginTop: 6 }}>
-                建议先修好再导入：把 CSV 用 Excel 打开另存一次（会自动加引号），或直接上传 .xlsx 文件。
+                {t("建议先修好再导入：把 CSV 用 Excel 打开另存一次（会自动加引号），或直接上传 .xlsx 文件。")}
               </div>
               <label className="check" style={{ marginTop: 8 }}>
                 <input type="checkbox" checked={ackIssues} onChange={(e) => setAckIssues(e.target.checked)} />
-                我已核对上面的预览金额无误，仍要导入
+                {t("我已核对上面的预览金额无误，仍要导入")}
               </label>
             </Note>
           )}
           <div className="table-wrap" style={{ border: "1px solid var(--border-soft)", borderRadius: 10 }}>
             <table className="tbl">
               <thead>
-                <tr><th>日期</th><th>描述</th><th>方向</th><th className="ta-r">金额</th></tr>
+                <tr><th>{t("日期")}</th><th>{t("描述")}</th><th>{t("方向")}</th><th className="ta-r">{t("金额")}</th></tr>
               </thead>
               <tbody>
-                {drafts.slice(0, 8).map((t, i) => (
+                {drafts.slice(0, 8).map((tx, i) => (
                   <tr key={i}>
-                    <td className="num nowrap">{t.date}</td>
-                    <td className="td-clip">{t.description}</td>
-                    <td className={t.direction === "income" ? "pos" : "neg"}>{t.direction === "income" ? "收入" : "支出"}</td>
-                    <td className="ta-r num nowrap">{formatMoney(t.amount, mapping.currency)}</td>
+                    <td className="num nowrap">{tx.date}</td>
+                    <td className="td-clip">{tx.description}</td>
+                    <td className={tx.direction === "income" ? "pos" : "neg"}>{tx.direction === "income" ? t("收入") : t("支出")}</td>
+                    <td className="ta-r num nowrap">{formatMoney(tx.amount, mapping.currency)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {drafts.length > 8 && <div className="tiny faint">仅显示前 8 行，其余 {drafts.length - 8} 笔一并导入。</div>}
+          {drafts.length > 8 && <div className="tiny faint">{t("仅显示前 8 行，其余 {n} 笔一并导入。", { n: drafts.length - 8 })}</div>}
           <div className="row">
-            <button className="btn" onClick={() => setStep("map")}>返回修改</button>
+            <button className="btn" onClick={() => setStep("map")}>{t("返回修改")}</button>
             <button className="btn btn-primary" disabled={!drafts.length || (issues && !ackIssues)} onClick={() => commit()}>
-              确认导入 {drafts.length} 笔
+              {t("确认导入 {n} 笔", { n: drafts.length })}
             </button>
           </div>
         </Card>
@@ -372,8 +385,8 @@ export default function UploadView({ data, setData, goToReview }) {
         <Card>
           <div className="empty">
             <Loader2 size={22} className="spin" color="#2F6F5E" />
-            <div style={{ marginTop: 10, fontWeight: 500 }}>正在读取 PDF 对账单…</div>
-            <p className="tiny">全部在本机完成，文件不会上传到任何服务器。</p>
+            <div style={{ marginTop: 10, fontWeight: 500 }}>{t("正在读取 PDF 对账单…")}</div>
+            <p className="tiny">{t("全部在本机完成，文件不会上传到任何服务器。")}</p>
           </div>
         </Card>
       )}
@@ -381,19 +394,19 @@ export default function UploadView({ data, setData, goToReview }) {
       {step === "pdf-preview" && pdfResult && (
         <Card className="stack-sm">
           <div className="card-title">
-            {pdfResult.parserName} · 识别出 {pdfResult.transactions.length} 笔交易
+            {pdfResult.parserName} · {t("识别出 {n} 笔交易", { n: pdfResult.transactions.length })}
           </div>
           <div className="tiny faint">
-            账号 {pdfResult.accountNumber || "—"}
-            {pdfResult.period ? ` · 账期 ${pdfResult.period.start} 至 ${pdfResult.period.end}` : ""}
-            {` · 共 ${pdfResult.statementPages} 个交易页`}
+            {t("账号 {account}", { account: pdfResult.accountNumber || "—" })}
+            {pdfResult.period ? t(" · 账期 {start} 至 {end}", { start: pdfResult.period.start, end: pdfResult.period.end }) : ""}
+            {t(" · 共 {n} 个交易页", { n: pdfResult.statementPages })}
           </div>
 
-          <ReconciliationPanel recon={pdfResult.reconciliation} currency={mapping.currency} />
+          <ReconciliationPanel recon={pdfResult.reconciliation} currency={mapping.currency} t={t} />
 
           {pdfResult.warnings.length > 0 && (
             <Note tone="warn">
-              <b>解析提示</b>
+              <b>{t("解析提示")}</b>
               <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
                 {pdfResult.warnings.map((w, i) => <li key={i}>{w}</li>)}
               </ul>
@@ -401,14 +414,14 @@ export default function UploadView({ data, setData, goToReview }) {
           )}
 
           <div className="grid-form">
-            <Field label="币种">
+            <Field label={t("币种")}>
               <select className="select" value={mapping.currency}
                 onChange={(e) => setMapping({ ...mapping, currency: e.target.value })}>
                 {data.currencies.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </Field>
-            <Field label="账户名称">
-              <input className="input" value={mapping.account} placeholder="例如：OCBC 储蓄"
+            <Field label={t("账户名称")}>
+              <input className="input" value={mapping.account} placeholder={t("例如：OCBC 储蓄")}
                 onChange={(e) => setMapping({ ...mapping, account: e.target.value })} />
             </Field>
           </div>
@@ -416,17 +429,17 @@ export default function UploadView({ data, setData, goToReview }) {
           <div className="table-wrap" style={{ border: "1px solid var(--border-soft)", borderRadius: 10, maxHeight: 320, overflowY: "auto" }}>
             <table className="tbl">
               <thead>
-                <tr><th>日期</th><th>描述</th><th className="ta-r">金额</th><th className="ta-r">余额</th></tr>
+                <tr><th>{t("日期")}</th><th>{t("描述")}</th><th className="ta-r">{t("金额")}</th><th className="ta-r">{t("余额")}</th></tr>
               </thead>
               <tbody>
-                {pdfResult.transactions.map((t, i) => (
+                {pdfResult.transactions.map((tx, i) => (
                   <tr key={i}>
-                    <td className="num nowrap">{t.date}</td>
-                    <td className="td-clip" title={t.raw}>{t.description}</td>
-                    <td className={`ta-r num nowrap ${t.direction === "income" ? "pos" : "neg"}`}>
-                      {t.direction === "income" ? "+" : "-"}{formatMoney(t.amount, mapping.currency)}
+                    <td className="num nowrap">{tx.date}</td>
+                    <td className="td-clip" title={tx.raw}>{tx.description}</td>
+                    <td className={`ta-r num nowrap ${tx.direction === "income" ? "pos" : "neg"}`}>
+                      {tx.direction === "income" ? "+" : "-"}{formatMoney(tx.amount, mapping.currency)}
                     </td>
-                    <td className="ta-r num nowrap faint">{t.balance != null ? formatMoney(t.balance, mapping.currency) : "—"}</td>
+                    <td className="ta-r num nowrap faint">{tx.balance != null ? formatMoney(tx.balance, mapping.currency) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -435,22 +448,22 @@ export default function UploadView({ data, setData, goToReview }) {
 
           {!pdfResult.reconciliation.ok && (
             <Note tone="error">
-              对账校验没有通过，说明至少有一笔金额被读错了。<b>不建议直接导入。</b>
+              {t("对账校验没有通过，说明至少有一笔金额被读错了。")}<b>{t("不建议直接导入。")}</b>
               <label className="check" style={{ marginTop: 8 }}>
                 <input type="checkbox" checked={ackRecon} onChange={(e) => setAckRecon(e.target.checked)} />
-                我已逐笔核对上面的明细，确认无误，仍要导入
+                {t("我已逐笔核对上面的明细，确认无误，仍要导入")}
               </label>
             </Note>
           )}
 
           <div className="row">
-            <button className="btn" onClick={resetAll}>重新选择</button>
+            <button className="btn" onClick={resetAll}>{t("重新选择")}</button>
             <button
               className="btn btn-primary"
               disabled={!pdfResult.reconciliation.ok && !ackRecon}
               onClick={() => commit(pdfResult.transactions, "import-pdf")}
             >
-              确认导入 {pdfResult.transactions.length} 笔
+              {t("确认导入 {n} 笔", { n: pdfResult.transactions.length })}
             </button>
           </div>
         </Card>
@@ -459,18 +472,18 @@ export default function UploadView({ data, setData, goToReview }) {
       {step === "done" && summary && (
         <Card className="stack">
           <div className="card-title pos" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <CheckCircle2 size={17} />导入完成
+            <CheckCircle2 size={17} />{t("导入完成")}
           </div>
           <ul className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-            <li>新增 <b>{summary.added}</b> 笔交易（跳过 {summary.skipped} 笔重复）</li>
-            <li>自动分类 <b>{summary.autoCategorized}</b> 笔</li>
-            <li>需要你确认 <b>{summary.needsReview}</b> 笔</li>
+            <li>{t("新增 ")}<b>{summary.added}</b>{t(" 笔交易（跳过 {skipped} 笔重复）", { skipped: summary.skipped })}</li>
+            <li>{t("自动分类 ")}<b>{summary.autoCategorized}</b>{t(" 笔")}</li>
+            <li>{t("需要你确认 ")}<b>{summary.needsReview}</b>{t(" 笔")}</li>
           </ul>
-          <Note tone="warn">数据还在本机。记得点右上角的「保存到 GitHub」，否则换设备看不到。</Note>
+          <Note tone="warn">{t("数据还在本机。记得点右上角的「保存到 GitHub」，否则换设备看不到。")}</Note>
           <div className="row">
-            <button className="btn" onClick={resetAll}>继续导入下一份</button>
+            <button className="btn" onClick={resetAll}>{t("继续导入下一份")}</button>
             {summary.needsReview > 0 && (
-              <button className="btn btn-amber" onClick={goToReview}>去确认这 {summary.needsReview} 笔</button>
+              <button className="btn btn-amber" onClick={goToReview}>{t("去确认这 {n} 笔", { n: summary.needsReview })}</button>
             )}
           </div>
         </Card>

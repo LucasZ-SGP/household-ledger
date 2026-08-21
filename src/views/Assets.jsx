@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { Card, Field, Note, EmptyState, ConfirmBar } from "../components/ui.jsx";
 import { formatMoney, accentFor, uid } from "../lib/model.js";
+import { useLang } from "../lib/i18n.js";
 import {
   ASSET_KINDS, LIABILITY_KINDS, KIND_META, newAccount, valueAccount,
   summarizeAccounts, heldSymbols, snapshotFromAccounts, accountAlerts,
@@ -26,30 +27,35 @@ function headlineOf(acc, quotes, asOf) {
   return { text: parts.map(([c, amt]) => formatMoney(amt, c)).join(" + "), side: v.side };
 }
 
-function subtitleOf(acc, quotes, asOf, accounts = []) {
+function subtitleOf(acc, quotes, asOf, accounts = [], t) {
   if (acc.kind === "fixed_deposit") {
     const v = valueFixedDeposit(acc, asOf);
-    if (!v.maturityDate) return "未设到期日";
-    return v.matured ? `已于 ${v.maturityDate} 到期` : `${v.maturityDate} 到期 · 还有 ${v.daysToMaturity} 天`;
+    if (!v.maturityDate) return t("未设到期日");
+    return v.matured
+      ? t("已于 {date} 到期", { date: v.maturityDate })
+      : t("{date} 到期 · 还有 {days} 天", { date: v.maturityDate, days: v.daysToMaturity });
   }
   if (acc.kind === "brokerage") {
     const n = (acc.holdings || []).length;
     const cash = Object.entries(cashOf(acc)).map(([c, amt]) => formatMoney(amt, c)).join(" + ");
-    return `${n} 个持仓${cash ? ` · 现金 ${cash}` : ""}`;
+    return t("{n} 个持仓", { n }) + (cash ? t(" · 现金 {cash}", { cash }) : "");
   }
-  if (acc.kind === "cpf") return `OA/SA/MA/RA 合计 ${formatMoney(cpfTotal(acc), acc.currency)}`;
+  if (acc.kind === "cpf") return t("OA/SA/MA/RA 合计 {total}", { total: formatMoney(cpfTotal(acc), acc.currency) });
   if (isPhysical(acc.kind)) return acc.description || "";
   if (acc.kind === "mortgage" || acc.kind === "loan") {
-    const t = loanTimeline(acc, asOf);
-    return `年利率 ${t.rate}% · 每月 ${acc.accrualDay || 1} 号计息 · ${t.rows.length} 条记录 · 下次 ${t.nextAccrualDate || "—"}`;
+    const tl = loanTimeline(acc, asOf);
+    return t("年利率 {rate}% · 每月 {day} 号计息 · {count} 条记录 · 下次 {next}", {
+      rate: tl.rate, day: acc.accrualDay || 1, count: tl.rows.length, next: tl.nextAccrualDate || "—",
+    });
   }
-  if (acc.kind === "cash" && acc.annualRate) return `年利率 ${acc.annualRate}%`;
+  if (acc.kind === "cash" && acc.annualRate) return t("年利率 {rate}%", { rate: acc.annualRate });
   return "";
 }
 
 // ---------------------------------------------------------------------------
 
 function AccountForm({ draft, setDraft, currencies }) {
+  const { t } = useLang();
   const set = (patch) => setDraft({ ...draft, ...patch });
   // Keep the maturity date in step with the term unless it was set by hand.
   const setTerm = (months) => {
@@ -64,16 +70,16 @@ function AccountForm({ draft, setDraft, currencies }) {
   return (
     <div className="stack-sm">
       <div className="grid-form">
-        <Field label="名称">
-          <input className="input" autoFocus value={draft.name} placeholder={KIND_META[draft.kind]?.label}
+        <Field label={t("名称")}>
+          <input className="input" autoFocus value={draft.name} placeholder={t(KIND_META[draft.kind]?.label)}
             onChange={(e) => set({ name: e.target.value })} />
         </Field>
-        <Field label="机构（可选）">
+        <Field label={t("机构（可选）")}>
           <input className="input" value={draft.institution || ""} placeholder="OCBC / IBKR / DBS"
             onChange={(e) => set({ institution: e.target.value })} />
         </Field>
         {draft.kind !== "cpf" && !isPhysical(draft.kind) && (
-          <Field label="币种">
+          <Field label={t("币种")}>
             <select className="select" value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
               {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -82,11 +88,11 @@ function AccountForm({ draft, setDraft, currencies }) {
 
         {draft.kind === "cash" && (
           <>
-            <Field label="余额">
+            <Field label={t("余额")}>
               <input className="input num" type="number" step="0.01" value={draft.balance}
                 onChange={(e) => set({ balance: e.target.value })} />
             </Field>
-            <Field label="年利率 %">
+            <Field label={t("年利率 %")}>
               <input className="input num" type="number" step="0.01" value={draft.annualRate}
                 onChange={(e) => set({ annualRate: e.target.value })} />
             </Field>
@@ -95,43 +101,43 @@ function AccountForm({ draft, setDraft, currencies }) {
 
         {draft.kind === "fixed_deposit" && (
           <>
-            <Field label="本金">
+            <Field label={t("本金")}>
               <input className="input num" type="number" step="0.01" value={draft.principal}
                 onChange={(e) => set({ principal: e.target.value })} />
             </Field>
-            <Field label="年利率 %">
+            <Field label={t("年利率 %")}>
               <input className="input num" type="number" step="0.01" value={draft.annualRate}
                 onChange={(e) => set({ annualRate: e.target.value })} />
             </Field>
-            <Field label="起息日">
+            <Field label={t("起息日")}>
               <input className="input" type="date" value={draft.startDate} onChange={(e) => setStart(e.target.value)} />
             </Field>
-            <Field label="存期（月）">
+            <Field label={t("存期（月）")}>
               <input className="input num" type="number" value={draft.termMonths}
                 onChange={(e) => setTerm(e.target.value)} />
             </Field>
-            <Field label="到期日">
+            <Field label={t("到期日")}>
               <input className="input" type="date" value={draft.maturityDate || ""}
                 onChange={(e) => set({ maturityDate: e.target.value })} />
             </Field>
-            <Field label="计息方式">
+            <Field label={t("计息方式")}>
               <select className="select" value={draft.compounding} onChange={(e) => set({ compounding: e.target.value })}>
-                <option value="simple">到期一次性付息（单利）</option>
-                <option value="monthly">按月复利</option>
+                <option value="simple">{t("到期一次性付息（单利）")}</option>
+                <option value="monthly">{t("按月复利")}</option>
               </select>
             </Field>
           </>
         )}
 
         {draft.kind === "brokerage" && (
-          <Field label="闲散资金（现金）">
+          <Field label={t("闲散资金（现金）")}>
             <input className="input num" type="number" step="0.01" value={draft.cash}
               onChange={(e) => set({ cash: e.target.value })} />
           </Field>
         )}
 
         {draft.kind === "other_asset" && (
-          <Field label="估值">
+          <Field label={t("估值")}>
             <input className="input num" type="number" step="0.01" value={draft.value}
               onChange={(e) => set({ value: e.target.value })} />
           </Field>
@@ -139,45 +145,43 @@ function AccountForm({ draft, setDraft, currencies }) {
 
         {(draft.kind === "mortgage" || draft.kind === "loan") && (
           <>
-            <Field label="放款金额（本金）">
+            <Field label={t("放款金额（本金）")}>
               <input className="input num" type="number" step="0.01" value={draft.principal}
                 onChange={(e) => set({ principal: e.target.value })} />
             </Field>
-            <Field label="年利率 %">
+            <Field label={t("年利率 %")}>
               <input className="input num" type="number" step="0.01" value={draft.annualRate}
                 onChange={(e) => set({ annualRate: e.target.value })} />
             </Field>
-            <Field label="放款日">
+            <Field label={t("放款日")}>
               <input className="input" type="date" value={draft.startDate}
                 onChange={(e) => set({ startDate: e.target.value })} />
             </Field>
-            <Field label="每月计息日">
+            <Field label={t("每月计息日")}>
               <input className="input num" type="number" min="1" max="28" value={draft.accrualDay}
                 onChange={(e) => set({ accrualDay: e.target.value })} />
             </Field>
-            <Field label="月供（可选）">
+            <Field label={t("月供（可选）")}>
               <input className="input num" type="number" step="0.01" value={draft.monthlyPayment}
                 onChange={(e) => set({ monthlyPayment: e.target.value })} />
             </Field>
           </>
         )}
       </div>
-      <Field label="备注（可选）">
+      <Field label={t("备注（可选）")}>
         <input className="input" value={draft.note || ""} onChange={(e) => set({ note: e.target.value })} />
       </Field>
       {draft.kind === "cpf" && (
-        <div className="tiny faint">CPF 账户固定按 SGD 计。建好之后展开账户，把 OA / SA / MA / RA 的余额填进去。</div>
+        <div className="tiny faint">{t("CPF 账户固定按 SGD 计。建好之后展开账户，把 OA / SA / MA / RA 的余额填进去。")}</div>
       )}
       {(draft.kind === "mortgage" || draft.kind === "loan") && (
         <div className="tiny faint">
-          填「放款金额」和「放款日」，之后每月计息日的利息会自动往上加。
-          有银行的 Statement of Account 的话，建好账户后展开它、点「导入对账单」整段粘贴进去，
-          历史记录一次就补齐了 —— 比手敲快得多，而且会用对账单自己的期末余额校验一遍。
+          {t("填「放款金额」和「放款日」，之后每月计息日的利息会自动往上加。有银行的 Statement of Account 的话，建好账户后展开它、点「导入对账单」整段粘贴进去，历史记录一次就补齐了 —— 比手敲快得多，而且会用对账单自己的期末余额校验一遍。")}
         </div>
       )}
       {isPhysical(draft.kind) && (
         <div className="tiny faint">
-          房产和汽车只记名字和说明，不记金额，也不计入资产合计 —— 它们会以名字的形式列在总览里。
+          {t("房产和汽车只记名字和说明，不记金额，也不计入资产合计 —— 它们会以名字的形式列在总览里。")}
         </div>
       )}
     </div>
@@ -187,6 +191,7 @@ function AccountForm({ draft, setDraft, currencies }) {
 // ---------------------------------------------------------------------------
 
 export default function Assets({ data, setData, quoteCfg, goToSettings }) {
+  const { t } = useLang();
   const asOf = todayISO();
   const [expanded, setExpanded] = useState({});
   const [adding, setAdding] = useState(null);   // draft account
@@ -288,7 +293,7 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
         ...rows,
       ],
     }));
-    setSnapshotNote(`已把今天的资产负债写入净资产快照（${rows.length} 条）。`);
+    setSnapshotNote(t("已把今天的资产负债写入净资产快照（{count} 条）。", { count: rows.length }));
   }
 
   function startAdd(kind) {
@@ -299,7 +304,7 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
 
   function commitAdd() {
     if (!adding) return;
-    const acc = { ...adding, name: adding.name.trim() || KIND_META[adding.kind].label, id: adding.id || uid() };
+    const acc = { ...adding, name: adding.name.trim() || t(KIND_META[adding.kind].label), id: adding.id || uid() };
     upsert(acc);
     setExpanded((p) => ({ ...p, [acc.id]: true }));
     setAdding(null);
@@ -321,17 +326,17 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
               </button>
               <span className="dot" style={{ background: meta.color }} />
               <strong>{acc.name}</strong>
-              <span className="tiny faint">{meta.label}{acc.institution ? ` · ${acc.institution}` : ""}</span>
-              {acc.archived && <span className="tiny faint">· 已归档</span>}
+              <span className="tiny faint">{t(meta.label)}{acc.institution ? ` · ${acc.institution}` : ""}</span>
+              {acc.archived && <span className="tiny faint">· {t("已归档")}</span>}
             </div>
-            <div className="tiny faint" style={{ marginLeft: 33 }}>{subtitleOf(acc, quotes, asOf, accounts)}</div>
+            <div className="tiny faint" style={{ marginLeft: 33 }}>{subtitleOf(acc, quotes, asOf, accounts, t)}</div>
           </div>
           <div className="row" style={{ flexWrap: "nowrap" }}>
             <span className={`metric-value num ${head.side === "liability" ? "neg" : ""}`}>{head.text}</span>
             <button className="btn btn-sm" onClick={() => { setEditing(isEditing ? null : { ...acc }); setAdding(null); }}>
-              {isEditing ? "取消" : "编辑"}
+              {isEditing ? t("取消") : t("编辑")}
             </button>
-            <button className="btn-icon" title={acc.archived ? "取消归档" : "归档"}
+            <button className="btn-icon" title={acc.archived ? t("取消归档") : t("归档")}
               onClick={() => patchAccount(acc.id, { archived: !acc.archived })}>
               {acc.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
             </button>
@@ -343,8 +348,8 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
           <div className="stack-sm" style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 10 }}>
             <AccountForm draft={editing} setDraft={setEditing} currencies={data.currencies} />
             <div className="row">
-              <button className="btn btn-primary btn-sm" onClick={() => { upsert(editing); setEditing(null); }}>保存修改</button>
-              <button className="btn btn-sm" onClick={() => setEditing(null)}>取消</button>
+              <button className="btn btn-primary btn-sm" onClick={() => { upsert(editing); setEditing(null); }}>{t("保存修改")}</button>
+              <button className="btn btn-sm" onClick={() => setEditing(null)}>{t("取消")}</button>
             </div>
           </div>
         )}
@@ -356,7 +361,7 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
               accounts={accounts}
               patch={(p) => patchAccount(acc.id, p)} setQuote={setQuote}
             />
-            {acc.note ? <div className="tiny faint" style={{ marginTop: 8 }}>备注：{acc.note}</div> : null}
+            {acc.note ? <div className="tiny faint" style={{ marginTop: 8 }}>{t("备注：")}{acc.note}</div> : null}
           </div>
         )}
       </Card>
@@ -378,15 +383,15 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
                 </div>
                 <div className="grid-4">
                   <div>
-                    <div className="metric-label">资产</div>
+                    <div className="metric-label">{t("资产")}</div>
                     <div className="metric-value num pos">{formatMoney(row.assets, c)}</div>
                   </div>
                   <div>
-                    <div className="metric-label">负债</div>
+                    <div className="metric-label">{t("负债")}</div>
                     <div className="metric-value num neg">{formatMoney(row.liabilities, c)}</div>
                   </div>
                   <div style={{ gridColumn: "span 2" }}>
-                    <div className="metric-label">净值</div>
+                    <div className="metric-label">{t("净值")}</div>
                     <div className={`metric-value num ${row.net >= 0 ? "" : "neg"}`}>{formatMoney(row.net, c)}</div>
                   </div>
                 </div>
@@ -394,7 +399,7 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
                   {Object.entries(row.byKind).map(([kind, amt]) => (
                     <span key={kind} className="row" style={{ gap: 4 }}>
                       <span className="dot" style={{ background: KIND_META[kind]?.color, width: 7, height: 7 }} />
-                      {KIND_META[kind]?.label} {formatMoney(amt, c)}
+                      {t(KIND_META[kind]?.label)} {formatMoney(amt, c)}
                     </span>
                   ))}
                 </div>
@@ -406,26 +411,26 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
         <Card>
           <EmptyState
             icon={Landmark}
-            title="还没有任何资产或负债"
-            subtitle="把银行定期、股票账户、CPF、房贷登记进来，它们的利息、市值和欠款会自动往前算。"
-            action={<button className="btn btn-primary" onClick={() => startAdd("cash")}><Plus size={13} />添加第一个账户</button>}
+            title={t("还没有任何资产或负债")}
+            subtitle={t("把银行定期、股票账户、CPF、房贷登记进来，它们的利息、市值和欠款会自动往前算。")}
+            action={<button className="btn btn-primary" onClick={() => startAdd("cash")}><Plus size={13} />{t("添加第一个账户")}</button>}
           />
         </Card>
       )}
 
       {physical.length > 0 && (
         <Card>
-          <div className="card-title" style={{ marginBottom: 8 }}>实物资产</div>
+          <div className="card-title" style={{ marginBottom: 8 }}>{t("实物资产")}</div>
           <div className="row" style={{ gap: 14 }}>
             {physical.map((p) => (
               <span key={p.id} className="row" style={{ gap: 6 }}>
                 <span className="dot" style={{ background: KIND_META[p.kind]?.color }} />
                 <strong>{p.name}</strong>
-                <span className="tiny faint">{KIND_META[p.kind]?.label}{p.description ? ` · ${p.description}` : ""}</span>
+                <span className="tiny faint">{t(KIND_META[p.kind]?.label)}{p.description ? ` · ${p.description}` : ""}</span>
               </span>
             ))}
           </div>
-          <div className="tiny faint" style={{ marginTop: 8 }}>只登记名字，不计入上面的资产合计。</div>
+          <div className="tiny faint" style={{ marginTop: 8 }}>{t("只登记名字，不计入上面的资产合计。")}</div>
         </Card>
       )}
 
@@ -436,7 +441,7 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
         <div className="row">
           {ALL_KINDS.map((k) => (
             <button key={k} className="btn btn-sm" onClick={() => startAdd(k)}>
-              <Plus size={12} />{KIND_META[k].label}
+              <Plus size={12} />{t(KIND_META[k].label)}
             </button>
           ))}
         </div>
@@ -444,11 +449,11 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
           {accounts.some((a) => a.archived) && (
             <label className="check tiny">
               <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-              显示已归档
+              {t("显示已归档")}
             </label>
           )}
           {summary.currencies.length > 0 && (
-            <button className="btn btn-sm" onClick={makeSnapshot}><Camera size={13} />生成净资产快照</button>
+            <button className="btn btn-sm" onClick={makeSnapshot}><Camera size={13} />{t("生成净资产快照")}</button>
           )}
         </div>
       </div>
@@ -460,45 +465,49 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
         <Card className="stack-sm">
           <div className="row-between">
             <div>
-              <div className="card-title" style={{ margin: 0 }}>行情</div>
+              <div className="card-title" style={{ margin: 0 }}>{t("行情")}</div>
               <div className="tiny faint">
-                {provider.label} · {symbols.length} 个代码
-                {lastQuoteAt ? ` · 最后更新 ${String(lastQuoteAt).slice(0, 16).replace("T", " ")}` : " · 还没取过价"}
+                {provider.label} · {t("{count} 个代码", { count: symbols.length })}
+                {lastQuoteAt
+                  ? t(" · 最后更新 {time}", { time: String(lastQuoteAt).slice(0, 16).replace("T", " ") })
+                  : t(" · 还没取过价")}
                 {quoteCfg.provider !== "manual" && (staleSymbols.length
-                  ? ` · ${staleSymbols.length} 个待更新`
-                  : lastQuoteAt ? " · 今天已更新" : "")}
+                  ? t(" · {count} 个待更新", { count: staleSymbols.length })
+                  : lastQuoteAt ? t(" · 今天已更新") : "")}
               </div>
             </div>
             <div className="row">
-              <button className="btn btn-sm" onClick={goToSettings}>换行情源</button>
+              <button className="btn btn-sm" onClick={goToSettings}>{t("换行情源")}</button>
               <button className="btn btn-primary btn-sm" onClick={() => refreshQuotes()}
                 disabled={refreshing || quoteCfg.provider === "manual"}
-                title={quoteCfg.provider === "manual" ? "当前行情源是手动输入" : ""}>
+                title={quoteCfg.provider === "manual" ? t("当前行情源是手动输入") : ""}>
                 {refreshing ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
-                {refreshing ? `取价中 ${(progress?.index ?? 0) + 1}/${progress?.total ?? symbols.length}` : "刷新行情"}
+                {refreshing
+                  ? t("取价中 {index}/{total}", { index: (progress?.index ?? 0) + 1, total: progress?.total ?? symbols.length })
+                  : t("刷新行情")}
               </button>
             </div>
           </div>
           {quoteCfg.provider === "manual" && (
             <Note>
-              当前是「手动输入」模式，不会联网取价 —— 在持仓行里点铅笔图标手填价格即可。
-              想自动更新的话，到<button className="btn btn-sm" style={{ margin: "0 4px" }} onClick={goToSettings}>设置</button>
-              里选一个行情源。
+              {t("当前是「手动输入」模式，不会联网取价 —— 在持仓行里点铅笔图标手填价格即可。想自动更新的话，到")}
+              <button className="btn btn-sm" style={{ margin: "0 4px" }} onClick={goToSettings}>{t("设置")}</button>
+              {t("里选一个行情源。")}
             </Note>
           )}
           {quoteErrors.length > 0 && (
             <Note tone="warn">
-              <div>取价没有全部成功：</div>
+              <div>{t("取价没有全部成功：")}</div>
               <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
                 {quoteErrors.slice(0, 6).map((e, i) => <li key={i}>{e.message}</li>)}
               </ul>
               <div className="tiny" style={{ marginTop: 4 }}>
-                如果提示被浏览器拦下，多半是行情源不支持跨域，换一个行情源或在设置里配代理；也可以直接手填价格。
+                {t("如果提示被浏览器拦下，多半是行情源不支持跨域，换一个行情源或在设置里配代理；也可以直接手填价格。")}
               </div>
             </Note>
           )}
           {summary.missingQuotes.length > 0 && !refreshing && (
-            <div className="tiny faint">还缺价格：{summary.missingQuotes.join("、")}</div>
+            <div className="tiny faint">{t("还缺价格：")}{summary.missingQuotes.join("、")}</div>
           )}
         </Card>
       )}
@@ -507,16 +516,16 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
       {adding && (
         <Card className="stack-sm">
           <div className="row-between">
-            <div className="card-title" style={{ margin: 0 }}>新增：{KIND_META[adding.kind].label}</div>
+            <div className="card-title" style={{ margin: 0 }}>{t("新增：{kind}", { kind: t(KIND_META[adding.kind].label) })}</div>
             <select className="select w-auto" style={{ width: "auto" }} value={adding.kind}
               onChange={(e) => setAdding(newAccount(e.target.value, adding.currency))}>
-              {ALL_KINDS.map((k) => <option key={k} value={k}>{KIND_META[k].label}</option>)}
+              {ALL_KINDS.map((k) => <option key={k} value={k}>{t(KIND_META[k].label)}</option>)}
             </select>
           </div>
           <AccountForm draft={adding} setDraft={setAdding} currencies={data.currencies} />
           <div className="row">
-            <button className="btn btn-primary" onClick={commitAdd}>添加账户</button>
-            <button className="btn" onClick={() => setAdding(null)}>取消</button>
+            <button className="btn btn-primary" onClick={commitAdd}>{t("添加账户")}</button>
+            <button className="btn" onClick={() => setAdding(null)}>{t("取消")}</button>
           </div>
         </Card>
       )}
@@ -524,21 +533,21 @@ export default function Assets({ data, setData, quoteCfg, goToSettings }) {
       {/* ---- lists ---- */}
       {assets.length > 0 && (
         <>
-          <div className="card-title" style={{ marginBottom: -4 }}>资产</div>
+          <div className="card-title" style={{ marginBottom: -4 }}>{t("资产")}</div>
           {assets.map(accountCard)}
         </>
       )}
       {liabilities.length > 0 && (
         <>
-          <div className="card-title" style={{ marginBottom: -4 }}>负债</div>
+          <div className="card-title" style={{ marginBottom: -4 }}>{t("负债")}</div>
           {liabilities.map(accountCard)}
         </>
       )}
 
       {confirmDelete && (
         <ConfirmBar
-          text="删除这个账户？它的持仓、还款记录会一起删掉，已经生成的净资产快照不受影响。"
-          confirmLabel="删除"
+          text={t("删除这个账户？它的持仓、还款记录会一起删掉，已经生成的净资产快照不受影响。")}
+          confirmLabel={t("删除")}
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => removeAccount(confirmDelete)}
         />

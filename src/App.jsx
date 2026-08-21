@@ -17,6 +17,7 @@ import Settings from "./views/Settings.jsx";
 import { freshState, normalizeState } from "./lib/model.js";
 import { loadLedger, saveLedger } from "./lib/github.js";
 import { EMPTY_QUOTE_CFG } from "./lib/quotes.js";
+import { LangProvider, useLang } from "./lib/i18n.js";
 
 const CFG_KEY = "ledger.github.config";
 const CACHE_KEY = "ledger.cache";
@@ -35,6 +36,14 @@ const NAV = [
   { id: "categories", label: "分类与规则", icon: Coins },
   { id: "settings", label: "设置", icon: SettingsIcon },
 ];
+
+export default function App() {
+  return (
+    <LangProvider>
+      <AppInner />
+    </LangProvider>
+  );
+}
 
 const EMPTY_CFG = { owner: "", repo: "", path: "ledger.json", branch: "main", token: "" };
 
@@ -67,7 +76,8 @@ function readCache() {
   }
 }
 
-export default function App() {
+function AppInner() {
+  const { t } = useLang();
   const [tab, setTab] = useState("dashboard");
   const [drawer, setDrawer] = useState(false);
 
@@ -191,8 +201,8 @@ export default function App() {
   const nav = (
     <>
       <div className="sidebar-brand">
-        <h1 className="heading">家账</h1>
-        <p>多币种家庭收支 · 净资产台账</p>
+        <h1 className="heading">{t("家账")}</h1>
+        <p>{t("多币种家庭收支 · 净资产台账")}</p>
       </div>
       <nav className="sidebar-nav">
         {NAV.map((item) => {
@@ -204,7 +214,7 @@ export default function App() {
               onClick={() => { setTab(item.id); setDrawer(false); }}
             >
               <Icon size={15} />
-              <span>{item.label}</span>
+              <span>{t(item.label)}</span>
               {item.id === "review" && reviewCount > 0 && <span className="badge">{reviewCount}</span>}
             </button>
           );
@@ -221,10 +231,10 @@ export default function App() {
       className={dirty ? "btn btn-amber" : "btn"}
       onClick={() => save()}
       disabled={status !== "idle" || !dirty}
-      title={configured ? "" : "请先在设置里配置 GitHub"}
+      title={configured ? "" : t("请先在设置里配置 GitHub")}
     >
       {status === "saving" ? <Loader2 size={13} className="spin" /> : <Save size={13} />}
-      {status === "saving" ? "保存中…" : dirty ? "保存到 GitHub" : "已同步"}
+      {status === "saving" ? t("保存中…") : dirty ? t("保存到 GitHub") : t("已同步")}
     </button>
   );
 
@@ -241,17 +251,17 @@ export default function App() {
       <div className="main">
         <div className="topbar">
           <button className="btn btn-sm" onClick={() => setDrawer(true)}><Menu size={16} /></button>
-          <strong className="heading">家账</strong>
+          <strong className="heading">{t("家账")}</strong>
           {saveButton}
         </div>
 
         <div className="content">
           <div className="row-between" style={{ marginBottom: 14 }}>
-            <h2 className="heading">{NAV.find((n) => n.id === tab)?.label}</h2>
+            <h2 className="heading">{t(NAV.find((n) => n.id === tab)?.label || "")}</h2>
             <div className="row">
               <span className="hide-sm"><SyncPill configured={configured} status={status} dirty={dirty} /></span>
               {status === "loading" && (
-                <span className="sync-pill faint"><Loader2 size={12} className="spin" />加载中…</span>
+                <span className="sync-pill faint"><Loader2 size={12} className="spin" />{t("加载中…")}</span>
               )}
               <div className="hide-sm">{saveButton}</div>
             </div>
@@ -260,9 +270,9 @@ export default function App() {
           {!configured && tab !== "settings" && (
             <div style={{ marginBottom: 14 }}>
               <Note tone="warn">
-                还没连接 GitHub，数据目前只存在这台设备上。
+                {t("还没连接 GitHub，数据目前只存在这台设备上。")}
                 <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => setTab("settings")}>
-                  去设置
+                  {t("去设置")}
                 </button>
               </Note>
             </div>
@@ -270,20 +280,20 @@ export default function App() {
 
           {banner && (
             <div style={{ marginBottom: 14 }}>
-              <Note tone={banner.tone}>{banner.message}</Note>
+              <Note tone={banner.tone}>{t(banner.message)}</Note>
             </div>
           )}
 
           {conflict && (
             <div style={{ marginBottom: 14 }}>
               <ConfirmBar
-                text="冲突处理：用本地这份覆盖远端，还是丢弃本地改动、重新拉取远端？"
-                confirmLabel="用本地覆盖远端"
+                text={t("冲突处理：用本地这份覆盖远端，还是丢弃本地改动、重新拉取远端？")}
+                confirmLabel={t("用本地覆盖远端")}
                 onCancel={() => { setConflict(false); load(); }}
                 onConfirm={() => save({ force: true })}
               />
               <div className="tiny faint" style={{ marginTop: 6 }}>
-                取消 = 丢弃本地改动并重新加载远端。两份都保留在 GitHub 历史里，事后可以在提交记录中找回。
+                {t("取消 = 丢弃本地改动并重新加载远端。两份都保留在 GitHub 历史里，事后可以在提交记录中找回。")}
               </div>
             </div>
           )}
@@ -298,7 +308,7 @@ export default function App() {
           {tab === "assets" && (
             <Assets data={data} setData={setData} quoteCfg={quoteCfg} goToSettings={() => setTab("settings")} />
           )}
-          {tab === "networth" && <NetWorth data={data} setData={setData} />}
+          {tab === "networth" && <NetWorth data={data} setData={setData} quoteCfg={quoteCfg} />}
           {tab === "categories" && <Categories data={data} setData={setData} />}
           {tab === "settings" && (
             <Settings
@@ -315,8 +325,9 @@ export default function App() {
 }
 
 function SyncPill({ configured, status, dirty }) {
-  if (!configured) return <span className="sync-pill faint"><CloudOff size={12} />未连接</span>;
-  if (status === "saving") return <span className="sync-pill faint"><Loader2 size={12} className="spin" />保存中…</span>;
-  if (dirty) return <span className="sync-pill warn"><span className="dirty-dot" />有未保存的修改</span>;
-  return <span className="sync-pill pos"><CheckCircle2 size={12} />已同步</span>;
+  const { t } = useLang();
+  if (!configured) return <span className="sync-pill faint"><CloudOff size={12} />{t("未连接")}</span>;
+  if (status === "saving") return <span className="sync-pill faint"><Loader2 size={12} className="spin" />{t("保存中…")}</span>;
+  if (dirty) return <span className="sync-pill warn"><span className="dirty-dot" />{t("有未保存的修改")}</span>;
+  return <span className="sync-pill pos"><CheckCircle2 size={12} />{t("已同步")}</span>;
 }

@@ -10,9 +10,10 @@ import {
   accentFor, formatMoney, monthKey, yearOf, catName, catColor,
   realValue, CURRENCY_META,
 } from "../lib/model.js";
+import { useLang } from "../lib/i18n.js";
 
-function CategoryBreakdown({ items, total, currency }) {
-  if (!items.length) return <div className="muted small" style={{ padding: "24px 0", textAlign: "center" }}>暂无数据</div>;
+function CategoryBreakdown({ items, total, currency, t }) {
+  if (!items.length) return <div className="muted small" style={{ padding: "24px 0", textAlign: "center" }}>{t("暂无数据")}</div>;
   return (
     <div className="row" style={{ alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
       <div style={{ width: 168, height: 168, flexShrink: 0 }}>
@@ -42,6 +43,7 @@ function CategoryBreakdown({ items, total, currency }) {
 }
 
 export default function Dashboard({ data }) {
+  const { t } = useLang();
   const currencies = data.currencies;
   const [ccy, setCcy] = useState(currencies[0]);
   const [year, setYear] = useState("全部");
@@ -110,12 +112,12 @@ export default function Dashboard({ data }) {
         </div>
         <div className="row">
           <select className="select w-auto" value={year} onChange={(e) => setYear(e.target.value)}>
-            <option value="全部">全部年份</option>
-            {years.map((y) => <option key={y} value={y}>{y} 年</option>)}
+            <option value="全部">{t("全部年份")}</option>
+            {years.map((y) => <option key={y} value={y}>{t("{y} 年", { y })}</option>)}
           </select>
           <label className="check" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}>
             <input type="checkbox" checked={real} onChange={(e) => setReal(e.target.checked)} />
-            通胀调整
+            {t("通胀调整")}
           </label>
         </div>
       </div>
@@ -124,33 +126,33 @@ export default function Dashboard({ data }) {
         <Card>
           <EmptyState
             icon={PieIcon}
-            title={`还没有 ${ccy} 的交易数据`}
-            subtitle="先到「导入账单」上传对账单，或在「交易记录」里手动添加一笔。"
+            title={t("还没有 {ccy} 的交易数据", { ccy })}
+            subtitle={t("先到「导入账单」上传对账单，或在「交易记录」里手动添加一笔。")}
           />
         </Card>
       ) : (
         <>
           <div className="grid-4">
             <Card>
-              <div className="metric-label"><ArrowUpRight size={12} color="#2F8558" />总收入</div>
+              <div className="metric-label"><ArrowUpRight size={12} color="#2F8558" />{t("总收入")}</div>
               <div className="metric-value num pos">{formatMoney(totalIncome, ccy)}</div>
             </Card>
             <Card>
-              <div className="metric-label"><ArrowDownRight size={12} color="#B5502E" />总支出</div>
+              <div className="metric-label"><ArrowDownRight size={12} color="#B5502E" />{t("总支出")}</div>
               <div className="metric-value num neg">{formatMoney(totalExpense, ccy)}</div>
             </Card>
             <Card>
-              <div className="metric-label">净现金流</div>
+              <div className="metric-label">{t("净现金流")}</div>
               <div className={`metric-value num ${net >= 0 ? "pos" : "neg"}`}>{formatMoney(net, ccy, { forceSign: true })}</div>
             </Card>
             <Card>
-              <div className="metric-label">储蓄率</div>
+              <div className="metric-label">{t("储蓄率")}</div>
               <div className="metric-value num">{savingsRate === null ? "—" : `${savingsRate}%`}</div>
             </Card>
           </div>
 
           <Card>
-            <div className="card-title">月度收支趋势</div>
+            <div className="card-title">{t("月度收支趋势")}</div>
             <div style={{ width: "100%", height: 220 }}>
               <ResponsiveContainer>
                 <BarChart data={months} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -160,8 +162,8 @@ export default function Dashboard({ data }) {
                     tickFormatter={(v) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : v)} />
                   <Tooltip formatter={(v) => formatMoney(v, ccy)} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="income" name="收入" fill="#3D8361" radius={[3, 3, 0, 0]} isAnimationActive={false} />
-                  <Bar dataKey="expense" name="支出" fill="#C1502E" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                  <Bar dataKey="income" name={t("收入")} fill="#3D8361" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                  <Bar dataKey="expense" name={t("支出")} fill="#C1502E" radius={[3, 3, 0, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -169,19 +171,19 @@ export default function Dashboard({ data }) {
 
           <div className="grid-2">
             <Card>
-              <div className="card-title">收入构成 <span className="tiny faint">工资 / 资本利得 / 其他</span></div>
-              <CategoryBreakdown items={incomeByCat} total={totalIncome} currency={ccy} />
+              <div className="card-title">{t("收入构成")} <span className="tiny faint">{t("工资 / 资本利得 / 其他")}</span></div>
+              <CategoryBreakdown items={incomeByCat} total={totalIncome} currency={ccy} t={t} />
             </Card>
             <Card>
-              <div className="card-title">支出构成</div>
-              <CategoryBreakdown items={expenseByCat} total={totalExpense} currency={ccy} />
+              <div className="card-title">{t("支出构成")}</div>
+              <CategoryBreakdown items={expenseByCat} total={totalExpense} currency={ccy} t={t} />
             </Card>
           </div>
 
           {real && (
             <div className="row tiny faint">
               <Info size={12} />
-              按设置中的 {ccy} 年通胀率 {data.inflationRates[ccy] ?? 0}% 折算为今日购买力，仅供参考。
+              {t("按设置中的 {ccy} 年通胀率 {rate}% 折算为今日购买力，仅供参考。", { ccy, rate: data.inflationRates[ccy] ?? 0 })}
             </div>
           )}
         </>

@@ -1,0 +1,20 @@
+// English strings for src/views/Dashboard.jsx, keyed by their Chinese source text.
+export default {
+  "暂无数据": "No data yet",
+  "全部年份": "All years",
+  "{y} 年": "{y}",
+  "通胀调整": "Inflation-adjusted",
+  "还没有 {ccy} 的交易数据": "No {ccy} transactions yet",
+  "先到「导入账单」上传对账单，或在「交易记录」里手动添加一笔。": "Go to \"Import Statement\" to upload a statement, or add an entry manually in \"Transactions\".",
+  "总收入": "Total income",
+  "总支出": "Total expense",
+  "净现金流": "Net cash flow",
+  "储蓄率": "Savings rate",
+  "月度收支趋势": "Monthly income & expense trend",
+  "收入": "Income",
+  "支出": "Expense",
+  "收入构成": "Income breakdown",
+  "工资 / 资本利得 / 其他": "Salary / capital gains / other",
+  "支出构成": "Expense breakdown",
+  "按设置中的 {ccy} 年通胀率 {rate}% 折算为今日购买力，仅供参考。": "Adjusted to today's purchasing power using the {ccy} annual inflation rate of {rate}% from Settings, for reference only.",
+};

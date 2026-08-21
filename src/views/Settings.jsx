@@ -1,11 +1,13 @@
 import React, { useState, useRef } from "react";
-import { X, Download, FileUp, RefreshCw, CheckCircle2, Loader2, History, ExternalLink, LineChart } from "lucide-react";
+import { X, Download, FileUp, RefreshCw, CheckCircle2, Loader2, History, ExternalLink, LineChart, Languages } from "lucide-react";
 import { Card, Field, Note, ConfirmBar } from "../components/ui.jsx";
 import { accentFor, freshState, normalizeState } from "../lib/model.js";
 import { verifyAccess, historyUrl } from "../lib/github.js";
 import { QUOTE_PROVIDERS, providerMeta, fetchQuote } from "../lib/quotes.js";
+import { useLang } from "../lib/i18n.js";
 
 export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuoteCfg, onReload }) {
+  const { t, lang, setLang } = useLang();
   const [form, setForm] = useState(cfg);
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
@@ -24,10 +26,10 @@ export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuot
       setCfg(form);
       setCheckResult({
         ok: true,
-        message: `已连接 ${info.fullName}${info.private ? "（私有）" : "（公开 — 建议改成私有仓库）"}`,
+        message: t(info.private ? "已连接 {repo}（私有）" : "已连接 {repo}（公开 — 建议改成私有仓库）", { repo: info.fullName }),
       });
     } catch (e) {
-      setCheckResult({ ok: false, message: e.message });
+      setCheckResult({ ok: false, message: t(e.message) });
     } finally {
       setChecking(false);
     }
@@ -58,9 +60,15 @@ export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuot
     try {
       const symbol = quoteCfg.provider === "stooq" ? "qqq.us" : "QQQ";
       const q = await fetchQuote(symbol, quoteCfg);
-      setQuoteTest({ ok: true, message: `取到 ${q.symbol} = ${q.price}${q.currency ? " " + q.currency : ""}（${String(q.asOf || "").slice(0, 10) || "刚刚"}）` });
+      setQuoteTest({
+        ok: true,
+        message: t("取到 {symbol} = {price}{ccy}（{when}）", {
+          symbol: q.symbol, price: q.price, ccy: q.currency ? " " + q.currency : "",
+          when: String(q.asOf || "").slice(0, 10) || t("刚刚"),
+        }),
+      });
     } catch (e) {
-      setQuoteTest({ ok: false, message: e.message });
+      setQuoteTest({ ok: false, message: t(e.message) });
     } finally {
       setTesting(false);
     }
@@ -82,7 +90,7 @@ export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuot
       try {
         setData(normalizeState(JSON.parse(String(reader.result))));
       } catch {
-        alert("文件不是合法的 JSON，无法导入。");
+        alert(t("文件不是合法的 JSON，无法导入。"));
       }
     };
     reader.readAsText(file);
@@ -96,25 +104,33 @@ export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuot
   return (
     <div className="stack narrow">
       <Card className="stack-sm">
-        <div className="card-title">GitHub 同步</div>
+        <div className="card-title"><Languages size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{t("语言")}</div>
+        <div className="tiny faint">{t("切换界面语言，你自己填写的分类名称、备注等内容不会被翻译。")}</div>
+        <div className="row">
+          <button className={`btn btn-sm ${lang === "zh" ? "btn-primary" : ""}`} onClick={() => setLang("zh")}>中文</button>
+          <button className={`btn btn-sm ${lang === "en" ? "btn-primary" : ""}`} onClick={() => setLang("en")}>English</button>
+        </div>
+      </Card>
+
+      <Card className="stack-sm">
+        <div className="card-title">{t("GitHub 同步")}</div>
         <div className="tiny faint">
-          账本以一个 JSON 文件的形式存在你的私有仓库里，每次保存是一次 commit。
-          Token 只保存在这台设备的浏览器里，不会上传到任何地方。
+          {t("账本以一个 JSON 文件的形式存在你的私有仓库里，每次保存是一次 commit。Token 只保存在这台设备的浏览器里，不会上传到任何地方。")}
         </div>
         <div className="grid-form">
-          <Field label="GitHub 用户名">
+          <Field label={t("GitHub 用户名")}>
             <input className="input" value={form.owner} placeholder="your-username"
               onChange={(e) => setForm({ ...form, owner: e.target.value.trim() })} />
           </Field>
-          <Field label="仓库名">
+          <Field label={t("仓库名")}>
             <input className="input" value={form.repo} placeholder="ledger-data"
               onChange={(e) => setForm({ ...form, repo: e.target.value.trim() })} />
           </Field>
-          <Field label="文件路径">
+          <Field label={t("文件路径")}>
             <input className="input" value={form.path} placeholder="ledger.json"
               onChange={(e) => setForm({ ...form, path: e.target.value.trim() })} />
           </Field>
-          <Field label="分支">
+          <Field label={t("分支")}>
             <input className="input" value={form.branch} placeholder="main"
               onChange={(e) => setForm({ ...form, branch: e.target.value.trim() })} />
           </Field>
@@ -127,78 +143,78 @@ export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuot
           <button className="btn btn-primary" onClick={saveConnection}
             disabled={checking || !form.owner || !form.repo || !form.token}>
             {checking ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} />}
-            {checking ? "检查中…" : "验证并保存"}
+            {checking ? t("检查中…") : t("验证并保存")}
           </button>
           {cfg.owner && cfg.repo && (
             <>
-              <button className="btn" onClick={onReload}><RefreshCw size={13} />从 GitHub 重新加载</button>
+              <button className="btn" onClick={onReload}><RefreshCw size={13} />{t("从 GitHub 重新加载")}</button>
               <a className="btn" href={historyUrl(cfg)} target="_blank" rel="noreferrer">
-                <History size={13} />查看历史版本
+                <History size={13} />{t("查看历史版本")}
               </a>
             </>
           )}
         </div>
         {checkResult && <Note tone={checkResult.ok ? "info" : "error"}>{checkResult.message}</Note>}
         <Note tone="warn">
-          Token 请用 fine-grained 类型，Repository access 只勾选这一个仓库，
-          权限只给 <b>Contents: Read and write</b>。这样即使泄露，影响也仅限于这个账本仓库。
+          {t("Token 请用 fine-grained 类型，Repository access 只勾选这一个仓库，权限只给")} <b>Contents: Read and write</b>。
+          {t("这样即使泄露，影响也仅限于这个账本仓库。")}
         </Note>
       </Card>
 
       <Card className="stack-sm">
-        <div className="card-title"><LineChart size={13} style={{ verticalAlign: -2, marginRight: 4 }} />行情数据源（股票价格）</div>
+        <div className="card-title"><LineChart size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{t("行情数据源（股票价格）")}</div>
         <div className="tiny faint">
-          「资产负债」页里的持仓靠这个自动取价。因为整个应用没有后端，请求是从你的浏览器直接发出去的 ——
-          行情源必须允许跨域访问才能用。取不到也不影响记账：可以在持仓里直接手填价格。
+          {t("「资产负债」页里的持仓靠这个自动取价。因为整个应用没有后端，请求是从你的浏览器直接发出去的 —— 行情源必须允许跨域访问才能用。取不到也不影响记账：可以在持仓里直接手填价格。")}
+        </div>
+        <div className="tiny faint">
+          {t("净资产页的币种换算固定使用 Finnhub 的汇率接口，用的就是这里填的 Key —— 如果行情源选的不是 Finnhub，请确保这个 Key 依然是 Finnhub 的。")}
         </div>
         <div className="grid-form">
-          <Field label="行情源">
+          <Field label={t("行情源")}>
             <select className="select" value={quoteCfg?.provider || "manual"}
               onChange={(e) => { setQuoteCfg({ ...quoteCfg, provider: e.target.value }); setQuoteTest(null); }}>
-              {QUOTE_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              {QUOTE_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{t(p.label)}</option>)}
             </select>
           </Field>
           {provider.needsKey && (
             <Field label="API Key">
-              <input className="input" type="password" value={quoteCfg?.apiKey || ""} placeholder="粘贴 API Key"
+              <input className="input" type="password" value={quoteCfg?.apiKey || ""} placeholder={t("粘贴 API Key")}
                 onChange={(e) => setQuoteCfg({ ...quoteCfg, apiKey: e.target.value.trim() })} />
             </Field>
           )}
         </div>
-        <div className="tiny faint">{provider.blurb}</div>
+        <div className="tiny faint">{t(provider.blurb)}</div>
         {provider.signup && (
           <a className="link tiny" href={provider.signup} target="_blank" rel="noreferrer">
-            去申请免费 Key <ExternalLink size={10} style={{ verticalAlign: -1 }} />
+            {t("去申请免费 Key")} <ExternalLink size={10} style={{ verticalAlign: -1 }} />
           </a>
         )}
         {quoteCfg?.provider !== "manual" && (
           <>
-            <Field label="代理地址（可选）">
+            <Field label={t("代理地址（可选）")}>
               <input className="input" value={quoteCfg?.proxy || ""} placeholder="https://your-worker.workers.dev/?url={url}"
                 onChange={(e) => setQuoteCfg({ ...quoteCfg, proxy: e.target.value.trim() })} />
             </Field>
             <div className="tiny faint">
-              只有在行情源被浏览器以跨域为由拦下时才需要。写成 <span className="mono-inline">{"https://…/?url={url}"}</span> 会把
-              目标地址编码后填进 <span className="mono-inline">{"{url}"}</span>；不带占位符则直接当前缀拼接。
-              注意代理方能看到你查了哪些股票代码，最好用自己部署的。
+              {t("只有在行情源被浏览器以跨域为由拦下时才需要。写成")} <span className="mono-inline">{"https://…/?url={url}"}</span> {t("会把目标地址编码后填进")} <span className="mono-inline">{"{url}"}</span>{t("；不带占位符则直接当前缀拼接。注意代理方能看到你查了哪些股票代码，最好用自己部署的。")}
             </div>
             <div className="row">
               <button className="btn" onClick={testQuote} disabled={testing}>
                 {testing ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} />}
-                {testing ? "测试中…" : "用 QQQ 测一下"}
+                {testing ? t("测试中…") : t("用 QQQ 测一下")}
               </button>
             </div>
             {quoteTest && <Note tone={quoteTest.ok ? "info" : "error"}>{quoteTest.message}</Note>}
           </>
         )}
         <Note tone="warn">
-          API Key 和 GitHub Token 一样只存在这台设备的浏览器里，不会写进账本文件、也不会提交到仓库。
+          {t("API Key 和 GitHub Token 一样只存在这台设备的浏览器里，不会写进账本文件、也不会提交到仓库。")}
         </Note>
       </Card>
 
       <Card className="stack-sm">
-        <div className="card-title">通货膨胀率（年化 %）</div>
-        <div className="tiny faint">用于总览页的「通胀调整」开关，把历史金额折算成今日购买力。</div>
+        <div className="card-title">{t("通货膨胀率（年化 %）")}</div>
+        <div className="tiny faint">{t("用于总览页的「通胀调整」开关，把历史金额折算成今日购买力。")}</div>
         {data.currencies.map((c) => (
           <div className="row" key={c}>
             <span className="num" style={{ width: 52, color: accentFor(c) }}>{c}</span>
@@ -214,7 +230,7 @@ export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuot
       </Card>
 
       <Card className="stack-sm">
-        <div className="card-title">币种管理</div>
+        <div className="card-title">{t("币种管理")}</div>
         <div className="row">
           {data.currencies.map((c) => (
             <span key={c} className="chip" style={{ cursor: "default" }}>
@@ -227,33 +243,33 @@ export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuot
             </span>
           ))}
         </div>
-        <div className="tiny faint">已有交易记录的币种不能删除。</div>
+        <div className="tiny faint">{t("已有交易记录的币种不能删除。")}</div>
         <div className="row" style={{ flexWrap: "nowrap", maxWidth: 320 }}>
-          <input className="input" maxLength={3} placeholder="新增币种代码，如 JPY"
+          <input className="input" maxLength={3} placeholder={t("新增币种代码，如 JPY")}
             value={newCcy} onChange={(e) => setNewCcy(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addCurrency()} />
-          <button className="btn btn-primary" onClick={addCurrency}>添加</button>
+          <button className="btn btn-primary" onClick={addCurrency}>{t("添加")}</button>
         </div>
       </Card>
 
       <Card className="stack-sm">
-        <div className="card-title">本地备份</div>
+        <div className="card-title">{t("本地备份")}</div>
         <div className="tiny faint">
-          GitHub 已经保留了每次保存的历史版本，这里的导出主要用于离线留档或迁移到别处。
+          {t("GitHub 已经保留了每次保存的历史版本，这里的导出主要用于离线留档或迁移到别处。")}
         </div>
         <div className="row">
-          <button className="btn" onClick={exportJson}><Download size={13} />导出 JSON</button>
-          <button className="btn" onClick={() => fileRef.current?.click()}><FileUp size={13} />导入 JSON</button>
+          <button className="btn" onClick={exportJson}><Download size={13} />{t("导出 JSON")}</button>
+          <button className="btn" onClick={() => fileRef.current?.click()}><FileUp size={13} />{t("导入 JSON")}</button>
           <input ref={fileRef} type="file" accept=".json" style={{ display: "none" }}
             onChange={(e) => e.target.files[0] && importJson(e.target.files[0])} />
           <button className="btn btn-danger" onClick={() => setConfirmReset(true)}>
-            <RefreshCw size={13} />清空本地数据
+            <RefreshCw size={13} />{t("清空本地数据")}
           </button>
         </div>
         {confirmReset && (
           <ConfirmBar
-            text="清空当前浏览器里的账本数据。GitHub 上已保存的版本不受影响，可以重新加载回来。"
-            confirmLabel="确认清空"
+            text={t("清空当前浏览器里的账本数据。GitHub 上已保存的版本不受影响，可以重新加载回来。")}
+            confirmLabel={t("确认清空")}
             onCancel={() => setConfirmReset(false)}
             onConfirm={() => { setData(freshState()); setConfirmReset(false); }}
           />

@@ -3,10 +3,12 @@ import { CheckCircle2, Check } from "lucide-react";
 import { Card, EmptyState } from "../components/ui.jsx";
 import { groupBy, sumBy } from "../lib/agg.js";
 import { formatMoney, uid, INCOME_PALETTE, EXPENSE_PALETTE } from "../lib/model.js";
+import { useLang } from "../lib/i18n.js";
 
 const NEW_CAT = "__new__";
 
 export default function Review({ data, setData }) {
+  const { t } = useLang();
   const pending = useMemo(() => data.transactions.filter((t) => t.needsReview), [data.transactions]);
 
   const groups = useMemo(() => {
@@ -82,8 +84,8 @@ export default function Review({ data, setData }) {
       <Card>
         <EmptyState
           icon={CheckCircle2}
-          title="没有待确认的交易"
-          subtitle="已导入的交易都分类完毕了。导入新账单后，关键词规则匹配不到的交易会出现在这里。"
+          title={t("没有待确认的交易")}
+          subtitle={t("已导入的交易都分类完毕了。导入新账单后，关键词规则匹配不到的交易会出现在这里。")}
         />
       </Card>
     );
@@ -92,7 +94,7 @@ export default function Review({ data, setData }) {
   return (
     <div className="stack narrow">
       <div className="small muted">
-        {pending.length} 笔待确认，按相同描述归为 {groups.length} 组。确认一组会套用到该组全部交易。
+        {t("{count} 笔待确认，按相同描述归为 {groupCount} 组。确认一组会套用到该组全部交易。", { count: pending.length, groupCount: groups.length })}
       </div>
 
       {groups.map((group) => {
@@ -109,7 +111,7 @@ export default function Review({ data, setData }) {
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 500 }}>{group[0].description}</div>
                 <div className="tiny faint" style={{ marginTop: 2 }}>
-                  {group.length} 笔 · {direction === "income" ? "收入" : "支出"} · 合计 {formatMoney(total, group[0].currency)} · {group[0].currency}
+                  {t("{count} 笔", { count: group.length })} · {direction === "income" ? t("收入") : t("支出")} · {t("合计 {total}", { total: formatMoney(total, group[0].currency) })} · {group[0].currency}
                 </div>
               </div>
               <div className="row" style={{ flexWrap: "nowrap" }}>
@@ -118,35 +120,35 @@ export default function Review({ data, setData }) {
                   value={pick.categoryId}
                   onChange={(e) => update(group, { categoryId: e.target.value })}
                 >
-                  <option value="">选择分类…</option>
+                  <option value="">{t("选择分类…")}</option>
                   {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                  <option value={NEW_CAT}>+ 新建分类…</option>
+                  <option value={NEW_CAT}>{t("+ 新建分类…")}</option>
                 </select>
                 {pick.categoryId === NEW_CAT && (
                   <input
                     className="input w-auto"
                     style={{ width: 130 }}
-                    placeholder="新分类名称"
+                    placeholder={t("新分类名称")}
                     value={pick.newName}
                     onChange={(e) => update(group, { newName: e.target.value })}
                   />
                 )}
                 <button className="btn btn-primary" disabled={!canConfirm} onClick={() => applyGroup(group)}>
-                  <Check size={13} />确认
+                  <Check size={13} />{t("确认")}
                 </button>
               </div>
             </div>
 
             <label className="check tiny" style={{ color: "var(--ink-soft)" }}>
               <input type="checkbox" checked={pick.makeRule} onChange={(e) => update(group, { makeRule: e.target.checked })} />
-              记住规则：以后描述包含
+              {t("记住规则：以后描述包含")}
               <input
                 className="input"
                 style={{ width: 150, padding: "2px 6px", fontSize: 11 }}
                 value={pick.pattern}
                 onChange={(e) => update(group, { pattern: e.target.value })}
               />
-              的交易自动归入此类
+              {t("的交易自动归入此类")}
             </label>
           </Card>
         );
