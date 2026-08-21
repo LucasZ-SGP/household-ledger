@@ -127,7 +127,8 @@ export function runUnitTests(t) {
   // ---------- money / inflation ----------
   t("formatMoney SGD", () => assert.equal(formatMoney(1234.5, "SGD"), "S$1,234.50"));
   t("formatMoney CNY", () => assert.equal(formatMoney(1234.5, "CNY"), "¥1,234.50"));
-  t("formatMoney unknown currency", () => assert.equal(formatMoney(10, "JPY"), "JPY 10.00"));
+  t("formatMoney JPY", () => assert.equal(formatMoney(10, "JPY"), "JP¥10.00"));
+  t("formatMoney unknown currency", () => assert.equal(formatMoney(10, "THB"), "THB 10.00"));
   t("formatMoney forceSign", () => assert.equal(formatMoney(10, "USD", { forceSign: true }), "+$10.00"));
   t("formatMoney negative", () => assert.equal(formatMoney(-10, "USD"), "-$10.00"));
   t("realValue inflates past amounts", () => {
