@@ -43,7 +43,7 @@ export default function NetWorth({ data, setData, quoteCfg }) {
     setRefreshing(true);
     setFxErrors([]);
     try {
-      const { rates, errors } = await fetchFxRates(bases, ccy, quoteCfg?.apiKey);
+      const { rates, errors } = await fetchFxRates(bases, ccy, { proxy: quoteCfg?.proxy });
       if (Object.keys(rates).length) {
         setData((prev) => ({ ...prev, fxRates: { ...(prev.fxRates || {}), ...rates } }));
       }
@@ -59,10 +59,10 @@ export default function NetWorth({ data, setData, quoteCfg }) {
     autoFetched.current = false;
   }, [ccy]);
   useEffect(() => {
-    if (autoFetched.current || !staleBases.length || !quoteCfg?.apiKey) return;
+    if (autoFetched.current || !staleBases.length) return;
     autoFetched.current = true;
     refreshFx(staleBases);
-  }, [staleBases, quoteCfg?.apiKey]);
+  }, [staleBases]);
 
   // Converts one entry into the display currency; null when the rate is missing.
   const toDisplay = (amount, currency) => convertAmount(amount, currency, ccy, fxRates);
@@ -125,19 +125,15 @@ export default function NetWorth({ data, setData, quoteCfg }) {
             <div>
               <div className="card-title" style={{ margin: 0 }}>{t("汇率")}</div>
               <div className="tiny faint">
-                {t("其他币种按 Finnhub 实时汇率自动折算为 {ccy}。", { ccy })}
+                {t("其他币种按当天汇率自动折算为 {ccy}，不需要 API Key。", { ccy })}
                 {staleBases.length ? t(" · {n} 个待更新", { n: staleBases.length }) : t(" · 今天已更新")}
               </div>
             </div>
-            <button className="btn btn-sm" onClick={() => refreshFx()} disabled={refreshing || !quoteCfg?.apiKey}
-              title={quoteCfg?.apiKey ? "" : t("请先在设置里填 Finnhub API Key")}>
+            <button className="btn btn-sm" onClick={() => refreshFx()} disabled={refreshing}>
               {refreshing ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
               {refreshing ? t("换算中…") : t("刷新汇率")}
             </button>
           </div>
-          {!quoteCfg?.apiKey && (
-            <Note tone="warn">{t("还没配置行情源的 API Key（需要是 Finnhub 的 Key），到设置里填一下即可自动换算。")}</Note>
-          )}
           {fxErrors.length > 0 && (
             <Note tone="warn">
               <div>{t("有几个币种没换算成功：")}</div>

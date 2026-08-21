@@ -4,16 +4,19 @@ export default {
     "It's worth recording a snapshot once a month: one line each for cash, investment accounts, property and other assets, plus liabilities like a mortgage balance — that's what draws the net-worth curve over time.",
   "换算为": "Convert to",
   "汇率": "Exchange rates",
-  "其他币种按 Finnhub 实时汇率自动折算为 {ccy}。": "Other currencies are converted to {ccy} automatically using live Finnhub rates.",
+  "其他币种按当天汇率自动折算为 {ccy}，不需要 API Key。": "Other currencies are converted to {ccy} automatically at the day's rate — no API key needed.",
   " · {n} 个待更新": " · {n} pending update",
   " · 今天已更新": " · up to date today",
   "换算中…": "Converting…",
   "刷新汇率": "Refresh rates",
-  "请先在设置里填 Finnhub API Key": "Add a Finnhub API key in Settings first",
-  "还没配置行情源的 API Key（需要是 Finnhub 的 Key），到设置里填一下即可自动换算。":
-    "No market-data API key is set (it needs to be a Finnhub key) — add one in Settings to convert automatically.",
   "有几个币种没换算成功：": "A few currencies didn't convert:",
-  "已跳过（上一个错误会同样发生）": "Skipped (the previous error would repeat)",
+
+  // fx.js errors
+  "没有指定目标币种。": "No target currency was specified.",
+  "当前环境不支持网络请求。": "This environment doesn't support network requests.",
+  "汇率请求被浏览器拦下了（跨域）。可以在设置里配一个代理。":
+    "The browser blocked the exchange-rate request (cross-origin). You can set up a proxy in Settings.",
+  "汇率源返回的不是 JSON，检查一下代理地址是否正确。": "The exchange-rate source didn't return JSON — check that the proxy URL is correct.",
   "还缺汇率：{list}，这些币种的记录暂不计入下面的合计。": "Still missing rates for: {list} — those records aren't included in the totals below.",
   "最新资产": "Latest assets",
   "最新负债": "Latest liabilities",

@@ -24,8 +24,8 @@ export default {
   "行情数据源（股票价格）": "Market data source (stock prices)",
   "「资产负债」页里的持仓靠这个自动取价。因为整个应用没有后端，请求是从你的浏览器直接发出去的 —— 行情源必须允许跨域访问才能用。取不到也不影响记账：可以在持仓里直接手填价格。":
     "Holdings on the Balance Sheet page price themselves automatically through this. Since the app has no backend, requests go straight from your browser — the provider has to allow cross-origin access. If it can't fetch a price, that's fine: type it in by hand on the holding.",
-  "净资产页的币种换算固定使用 Finnhub 的汇率接口，用的就是这里填的 Key —— 如果行情源选的不是 Finnhub，请确保这个 Key 依然是 Finnhub 的。":
-    "Currency conversion on the Net Worth page always goes through Finnhub's rate endpoint, using the key entered here — if the stock provider below isn't Finnhub, make sure this key is still a Finnhub key.",
+  "这里只管股票价格。净资产页的币种换算走的是另一个免费、无需 Key 的汇率源，不受这里的设置影响（代理地址除外）。":
+    "This section only covers stock prices. Currency conversion on the Net Worth page uses a separate free, key-less rate source and is unaffected by these settings (except the proxy URL).",
   "行情源": "Provider",
   "粘贴 API Key": "Paste API key",
   "去申请免费 Key": "Get a free key",

@@ -167,7 +167,7 @@ export default function Settings({ data, setData, cfg, setCfg, quoteCfg, setQuot
           {t("「资产负债」页里的持仓靠这个自动取价。因为整个应用没有后端，请求是从你的浏览器直接发出去的 —— 行情源必须允许跨域访问才能用。取不到也不影响记账：可以在持仓里直接手填价格。")}
         </div>
         <div className="tiny faint">
-          {t("净资产页的币种换算固定使用 Finnhub 的汇率接口，用的就是这里填的 Key —— 如果行情源选的不是 Finnhub，请确保这个 Key 依然是 Finnhub 的。")}
+          {t("这里只管股票价格。净资产页的币种换算走的是另一个免费、无需 Key 的汇率源，不受这里的设置影响（代理地址除外）。")}
         </div>
         <div className="grid-form">
           <Field label={t("行情源")}>

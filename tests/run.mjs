@@ -3,6 +3,7 @@ import { runGitHubTests } from "./github.mjs";
 import { runOcbcTests } from "./ocbc.mjs";
 import { runAssetTests } from "./assets.mjs";
 import { runQuoteTests } from "./quotes.mjs";
+import { runFxTests } from "./fx.mjs";
 import { runLoanStatementTests } from "./loanstatement.mjs";
 import { runFlowTests } from "./flows.mjs";
 
@@ -14,6 +15,7 @@ runGitHubTests(t);
 runOcbcTests(t);
 runAssetTests(t);
 runQuoteTests(t);
+runFxTests(t);
 runLoanStatementTests(t);
 runFlowTests(t);
 
