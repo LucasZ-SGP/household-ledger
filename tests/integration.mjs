@@ -670,7 +670,7 @@ await step("saved payload is valid UTF-8 JSON with Chinese intact", () => {
   assert.equal(fromStatement.length, 135, "the imported statement should be in the file");
   assert.ok(loan.entries.some((e) => e.type === "rebate" && e.source !== "statement"), "the hand-entered rebate should survive too");
   assert.equal(parsed.quotes.QQQ.price, 500, "the last known price should travel with the ledger");
-  assert.equal(parsed.schemaVersion, 3);
+  assert.equal(parsed.schemaVersion, 4);
   assert.equal(parsed.incomeEntries.length, 1, "the hand-entered income should persist");
   assert.equal(parsed.allocations.length, 2, "both allocations should persist");
   assert.equal(parsed.allocations[0].month, "2026-01");

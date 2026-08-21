@@ -252,7 +252,7 @@ export function runFlowTests(t) {
     const s = normalizeState({ transactions: [] });
     assert.deepEqual(s.incomeEntries, []);
     assert.deepEqual(s.allocations, []);
-    assert.equal(s.schemaVersion, 3);
+    assert.equal(s.schemaVersion, 4);
   });
   t("factories stamp the month and currency they were opened in", () => {
     assert.equal(newIncomeEntry("2026-08", "SGD").month, "2026-08");
