@@ -56,6 +56,8 @@ const LangContext = createContext({
   t: (s, vars) => interpolate(s, vars),
 });
 
+// Deliberately built with createElement rather than JSX: this file is a .js
+// module, and the test harness only turns the JSX loader on for .jsx.
 export function LangProvider({ children }) {
   const [lang, setLangState] = useState(readLang);
   const setLang = useCallback((l) => {
@@ -63,7 +65,7 @@ export function LangProvider({ children }) {
     try { localStorage.setItem(LANG_KEY, l); } catch { /* private mode */ }
   }, []);
   const t = useCallback((zh, vars) => translate(lang, zh, vars), [lang]);
-  return <LangContext.Provider value={{ lang, setLang, t }}>{children}</LangContext.Provider>;
+  return React.createElement(LangContext.Provider, { value: { lang, setLang, t } }, children);
 }
 
 export function useLang() {
